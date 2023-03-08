@@ -1096,9 +1096,8 @@ srs_error_t SrsRtmpConn::acquire_publish(SrsLiveSource* source)
 #endif
 
     // Bridge to RTC streaming.
-    printf("++++ rtmp_conn 1099\n");
 #if defined(SRS_RTC) && defined(SRS_FFMPEG_FIT)
-    printf("++++ SRS_RTC and SRS_FFMPEG_FIT defined, new SrsRtcFromRtmpBridge\n");
+    srs_trace("++++ SRS_RTC and SRS_FFMPEG_FIT defined, new SrsRtcFromRtmpBridge\n");
     if (rtc) {
         SrsRtcFromRtmpBridge *bridge = new SrsRtcFromRtmpBridge(rtc);
         if ((err = bridge->initialize(req)) != srs_success) {
