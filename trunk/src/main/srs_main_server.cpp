@@ -253,6 +253,14 @@ srs_error_t do_main(int argc, char** argv, char** envp)
 
 int main(int argc, char** argv, char** envp)
 {
+    srs_error("++++ log for learn\n");
+#if defined(SRS_RTC)
+    srs_error("++++ SRS_RTC defined\n");
+#endif 
+#if defined(SRS_FFMPEG_FIT)
+    srs_error("++++ SRS_FFMPEG_FIT defined\n");
+#endif
+
     srs_error_t err = do_main(argc, argv, envp);
 
     if (err != srs_success) {
