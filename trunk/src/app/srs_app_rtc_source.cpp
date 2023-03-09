@@ -348,6 +348,7 @@ SrsRtcSource::SrsRtcSource()
 
 SrsRtcSource::~SrsRtcSource()
 {
+    srs_trace("++++ delete SrsRtcSource\n");
     // never free the consumers,
     // for all consumers are auto free.
     consumers.clear();
