@@ -714,6 +714,7 @@ srs_error_t SrsRtcSource::on_timer(srs_utime_t interval)
 
 SrsRtcFromRtmpBridge::SrsRtcFromRtmpBridge(SrsRtcSource* source)
 {
+    srs_trace("++++ new SrsRtcFromRtmpBridge\n");
     req = NULL;
     source_ = source;
     format = new SrsRtmpFormat();
@@ -1321,6 +1322,7 @@ srs_error_t SrsRtcFromRtmpBridge::consume_packets(vector<SrsRtpPacket*>& pkts)
 
 SrsRtmpFromRtcBridge::SrsRtmpFromRtcBridge(SrsLiveSource *src)
 {
+    srs_trace("++++ new SrsRtmpFromRtcBridge\n");
     source_ = src;
     codec_ = NULL;
     is_first_audio = true;

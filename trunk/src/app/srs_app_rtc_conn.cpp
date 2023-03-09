@@ -1188,6 +1188,7 @@ srs_error_t SrsRtcPublishStream::initialize(SrsRequest* r, SrsRtcSourceDescripti
     // Bridge to rtmp
 #if defined(SRS_RTC) && defined(SRS_FFMPEG_FIT)
     bool rtc_to_rtmp = _srs_config->get_rtc_to_rtmp(req_->vhost);
+    srs_trace("++++ new SrsRtmpFromRtcBridge, rtc_to_rtmp:%d\n", rtc_to_rtmp);
     if (rtc_to_rtmp) {
         if ((err = _srs_sources->fetch_or_create(r, _srs_hybrid->srs()->instance(), &rtmp)) != srs_success) {
             return srs_error_wrap(err, "create source");
