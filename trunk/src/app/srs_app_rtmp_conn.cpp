@@ -506,6 +506,12 @@ srs_error_t SrsRtmpConn::stream_service_cycle()
     }
 
     req->strip();
+
+    // mb20230308
+    if (info->type == SrsRtmpConnPlay) {
+        req->stream += "-mb20230308";
+    }
+
     srs_trace("client identified, type=%s, vhost=%s, app=%s, stream=%s, param=%s, duration=%dms",
         srs_client_type_string(info->type).c_str(), req->vhost.c_str(), req->app.c_str(), req->stream.c_str(), req->param.c_str(), srsu2msi(req->duration));
 
