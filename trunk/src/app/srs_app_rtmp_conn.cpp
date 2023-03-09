@@ -509,7 +509,7 @@ srs_error_t SrsRtmpConn::stream_service_cycle()
 
     // mb20230308
     if (info->type == SrsRtmpConnPlay) {
-        req->stream += "-mb20230308";
+        req->stream += "-xxxmbmbbmbmxxx";
     }
 
     srs_trace("client identified, type=%s, vhost=%s, app=%s, stream=%s, param=%s, duration=%dms",
