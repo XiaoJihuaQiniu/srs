@@ -333,6 +333,7 @@ ISrsRtcSourceBridge::~ISrsRtcSourceBridge()
 
 SrsRtcSource::SrsRtcSource()
 {
+    srs_trace("++++ new SrsRtcSource\n");
     is_created_ = false;
     is_delivering_packets_ = false;
 
