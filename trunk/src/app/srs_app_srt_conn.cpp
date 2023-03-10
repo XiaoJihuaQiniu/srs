@@ -279,6 +279,13 @@ srs_error_t SrsMpegtsSrtConn::do_cycle()
         return srs_error_new(ERROR_SRT_CONN, "srt disabled, vhost=%s", req_->vhost.c_str());
     }
 
+    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // 最好是判断下发布的stream名字，不能包含这个后缀
+    srs_trace("++++ srt mode:%d\n", mode);
+    if (mode == SrtModePull) {
+        req->stream += "-xxxmbmbbmbmxxx";
+    }
+
     srs_trace("@srt, streamid=%s, stream_url=%s, vhost=%s, app=%s, stream=%s, param=%s",
               streamid.c_str(), req_->get_stream_url().c_str(), req_->vhost.c_str(), req_->app.c_str(), req_->stream.c_str(), req_->param.c_str());
 

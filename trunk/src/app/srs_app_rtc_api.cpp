@@ -645,7 +645,9 @@ srs_error_t SrsGoApiRtcWhip::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessa
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
-    ruc.req_->stream += "-xxxmbmbbmbmxxx";
+    if (action == "play") {
+        ruc.req_->stream += "-xxxmbmbbmbmxxx";
+    }
 
     // discovery vhost, resolve the vhost from config
     SrsConfDirective* parsed_vhost = _srs_config->get_vhost(ruc.req_->vhost);

@@ -581,6 +581,10 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
     // Correct the app and stream by path, which is created from template.
     // @remark Be careful that the stream has extension now, might cause identify fail.
     req->stream = srs_path_basename(r->path());
+    
+    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // 最好是判断下发布的stream名字，不能包含这个后缀
+    req->stream += "-xxxmbmbbmbmxxx";
 
     // update client ip
     req->ip = hc->remote_ip();

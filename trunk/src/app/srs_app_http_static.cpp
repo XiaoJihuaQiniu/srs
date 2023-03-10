@@ -94,6 +94,10 @@ srs_error_t SrsHlsStream::serve_m3u8_ctx(ISrsHttpResponseWriter* w, ISrsHttpMess
     // @remark Be careful that the stream has extension now, might cause identify fail.
     req->stream = srs_path_basename(r->path());
 
+    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // 最好是判断下发布的stream名字，不能包含这个后缀
+    req->stream += "-xxxmbmbbmbmxxx";    
+
     // Served by us.
     *served = true;
 
