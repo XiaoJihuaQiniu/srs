@@ -243,6 +243,40 @@ void SrsRtcConsumer::on_stream_change(SrsRtcSourceDescription* desc)
     }
 }
 
+// mb20230308 自定义rtc consumer承接rtc数据
+QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
+{
+    source = s;
+    should_update_source_id = false;
+}
+
+QnRtcConsumer::~QnRtcConsumer()
+{
+}
+
+void QnRtcConsumer::update_source_id()
+{
+    srs_trace("++++ QnRtcConsumer update source id\n");
+    should_update_source_id = true;
+    if (should_update_source_id) {
+        srs_trace("++++ update source_id=%s/%s", source->source_id().c_str(), source->pre_source_id().c_str());
+        should_update_source_id = false;
+    }
+}
+
+srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
+{
+    srs_trace("++++ QnRtcConsumer enqueue, is audio:%d, key:%d, bytes:%d\n", pkt->is_audio(), pkt->is_keyframe(), 
+                pkt->nb_bytes());
+    srs_freep(pkt);
+    return srs_success;
+}
+
+void QnRtcConsumer::on_stream_change(SrsRtcSourceDescription* desc)
+{
+    srs_trace("++++ QnRtcConsumer on stream change\n");
+}
+
 SrsRtcSourceManager::SrsRtcSourceManager()
 {
     lock = srs_mutex_new();
@@ -343,6 +377,8 @@ SrsRtcSource::SrsRtcSource()
     req = NULL;
     bridge_ = NULL;
 
+    qn_consumer_ = NULL;
+
     pli_for_rtmp_ = pli_elapsed_ = 0;
 }
 
@@ -437,6 +473,16 @@ srs_error_t SrsRtcSource::on_source_changed()
             _pre_source_id = id;
         }
         _source_id = id;
+    }
+
+    if (qn_consumer_) {
+        // Notify if context id changed.
+        if (id_changed) {
+            qn_consumer_->update_source_id();
+        }
+
+        // Notify about stream description.
+        qn_consumer_->on_stream_change(stream_desc_);
     }
 
     // Notify all consumers.
@@ -536,6 +582,11 @@ srs_error_t SrsRtcSource::on_publish()
     is_created_ = true;
     is_delivering_packets_ = true;
 
+    if (!qn_consumer_) {
+        srs_trace("new QnRtcConsumer for source_id=%s/%s", _source_id.c_str(), _pre_source_id.c_str());
+        qn_consumer_ = new QnRtcConsumer(this);
+    }
+
     // Notify the consumers about stream change event.
     if ((err = on_source_changed()) != srs_success) {
         return srs_error_wrap(err, "source id change");
@@ -629,6 +680,10 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
     if (_srs_circuit_breaker->hybrid_dying_water_level()) {
         _srs_pps_aloss2->sugar += (int64_t)consumers.size();
         return err;
+    }
+
+    if (qn_consumer_) {
+        qn_consumer_->enqueue(pkt->copy());
     }
 
     for (int i = 0; i < (int)consumers.size(); i++) {

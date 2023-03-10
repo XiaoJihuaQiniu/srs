@@ -99,6 +99,29 @@ public:
     void on_stream_change(SrsRtcSourceDescription* desc);
 };
 
+// mb20230308 自定义rtc consumer承接rtc数据
+class QnRtcConsumer
+{
+public:
+    QnRtcConsumer(SrsRtcSource* s);
+    ~QnRtcConsumer();
+
+    // When source id changed, notice client to print.
+    void update_source_id();
+    
+    // Put RTP packet into queue.
+    // @note We do not drop packet here, but drop it in sender.
+    srs_error_t enqueue(SrsRtpPacket* pkt);
+
+    void on_stream_change(SrsRtcSourceDescription* desc);
+
+private:
+    SrsRtcSource* source;
+    std::vector<SrsRtpPacket*> queue;
+    // when source id changed, notice all consumers
+    bool should_update_source_id;
+};
+
 class SrsRtcSourceManager
 {
 private:
@@ -183,6 +206,8 @@ private:
     bool is_delivering_packets_;
     // Notify stream event to event handler
     std::vector<ISrsRtcSourceEventHandler*> event_handlers_;
+    // to sink rtp packet
+    QnRtcConsumer* qn_consumer_;
 private:
     // The PLI for RTC2RTMP.
     srs_utime_t pli_for_rtmp_;
