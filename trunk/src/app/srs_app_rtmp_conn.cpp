@@ -509,9 +509,8 @@ srs_error_t SrsRtmpConn::stream_service_cycle()
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
-    if (info->type == SrsRtmpConnPlay) {
-        req->stream += "-xxxmbmbbmbmxxx";
-    }
+    srs_trace("++++ info->type:%d\n", info->type);
+    req->stream += "-xxxmbmbbmbmxxx";
 
     srs_trace("client identified, type=%s, vhost=%s, app=%s, stream=%s, param=%s, duration=%dms",
         srs_client_type_string(info->type).c_str(), req->vhost.c_str(), req->app.c_str(), req->stream.c_str(), req->param.c_str(), srsu2msi(req->duration));
