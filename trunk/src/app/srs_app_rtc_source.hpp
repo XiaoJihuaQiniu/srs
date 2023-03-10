@@ -115,15 +115,14 @@ public:
 
     void on_stream_change(SrsRtcSourceDescription* desc);
 
-private:
-    srs_error_t on_timer(srs_utime_t interval);
     std::string source_stream_url();
 
 private:
-    SrsRtcSource* source;
-    std::vector<SrsRtpPacket*> queue;
-    // when source id changed, notice all consumers
-    bool should_update_source_id;
+    srs_error_t on_timer(srs_utime_t interval);
+
+private:
+    SrsRtcSource* source_;
+    std::vector<SrsRtpPacket*> queue_;
     int64_t aud_packets_;
     int64_t vid_packets_;
     int64_t aud_bytes_;
@@ -136,21 +135,23 @@ private:
 class QnRtcProducer
 {
 public:
-    QnRtcProducer();
+    QnRtcProducer(SrsRtcSource* s);
     ~QnRtcProducer();
 
     srs_error_t on_data(char* data, int size);
 
+    std::string source_stream_url();
+
 private:
-    SrsRtcSource* source;
+    SrsRtcSource* source_;
 };
 
 // mb20230308 与服务器之间收发数据
 class QnReqStream
 {
 public:
-    bool enable = false;
-    QnRtcProducer* producer = NULL;
+    bool enable;
+    QnRtcProducer* producer;
 };
 
 // mb20230308
@@ -192,16 +193,20 @@ private:
 class QnTransport
 {
 public:
+    static QnTransport* Instance();
+
+    srs_error_t RequestStream(SrsRequest* req);
+    srs_error_t StopRequestStream(SrsRequest* req);
+    
+    srs_error_t AddConsumer(QnRtcConsumer* consumer);
+    
+    srs_error_t on_consumer_data(QnConsumerData* data);
+
+private:
     QnTransport();
     virtual ~QnTransport();
 
-    srs_error_t RequestStream(const SrsRequest* req);
-    srs_error_t StopRequestStream(const SrsRequest* req);
-    
-    srs_error_t AddConsumer(const QnRtcConsumer* consumer);
-    srs_error_t AddProducer(const QnRtcProducer* producer);
-    
-    srs_error_t on_consumer_data(QnConsumerData* data);
+    srs_error_t NewProducer(SrsRequest* req, QnRtcProducer* &producer);
 
 private:
     std::vector<QnConsumerData*> vec_consumer_data_;
