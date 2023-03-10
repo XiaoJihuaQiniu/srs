@@ -158,9 +158,9 @@ class QnConsumerData
 {
 public:
     /* head is json format */
-    QnConsumerData(const QnRtcConsumer* consumer, char* data, char* head, 
+    QnConsumerData(const QnRtcConsumer* consumer, int32_t type, char* data, char* head, 
                             uint32_t dsize, uint32_t hsize) : 
-                            consumer_(consumer), data_(data), head_(head), 
+                            consumer_(consumer), type_(type), head_(head), data_(data), 
                             date_size_(dsize), head_size_(hsize) {
     };
     
@@ -168,14 +168,12 @@ public:
         consumer_ = NULL;
         if (head_) {
             delete[] head_;
-            head_ = NULL
+            head_ = NULL;
         }
         if (data_) {
             delete[] data_;
-            data_ = NULL
+            data_ = NULL;
         }
-        date_size_ = 0;
-        head_size_ = 0;
     };
 
 private:
