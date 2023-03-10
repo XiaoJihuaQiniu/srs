@@ -132,6 +132,86 @@ private:
     int64_t vid_packet_tick_;
 };
 
+// mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
+class QnRtcProducer
+{
+public:
+    QnRtcProducer();
+    ~QnRtcProducer();
+
+    srs_error_t on_data(char* data, int size);
+
+private:
+    SrsRtcSource* source;
+};
+
+// mb20230308 与服务器之间收发数据
+class QnReqStream
+{
+public:
+    bool enable = false;
+    QnRtcProducer* producer = NULL;
+};
+
+// mb20230308
+class QnConsumerData
+{
+public:
+    /* head is json format */
+    QnConsumerData(const QnRtcConsumer* consumer, char* data, char* head, 
+                            uint32_t dsize, uint32_t hsize) : 
+                            consumer_(consumer), data_(data), head_(head), 
+                            date_size_(dsize), head_size_(hsize) {
+    };
+    
+    ~QnConsumerData() {
+        consumer_ = NULL;
+        if (head_) {
+            delete[] head_;
+            head_ = NULL
+        }
+        if (data_) {
+            delete[] data_;
+            data_ = NULL
+        }
+        date_size_ = 0;
+        head_size_ = 0;
+    };
+
+private:
+    const QnRtcConsumer* consumer_;
+    int32_t type_;      // audio or video
+    char* head_;        // json 格式数据
+    char* data_;
+    uint32_t date_size_;
+    uint32_t head_size_;
+};
+
+// mb20230308
+/***************************************************************************
+  | total size(4bytes) | head size(4bytes) | head (json) | payload data | 
+*****************************************************************************/
+class QnTransport
+{
+public:
+    QnTransport();
+    virtual ~QnTransport();
+
+    srs_error_t RequestStream(const SrsRequest* req);
+    srs_error_t StopRequestStream(const SrsRequest* req);
+    
+    srs_error_t AddConsumer(const QnRtcConsumer* consumer);
+    srs_error_t AddProducer(const QnRtcProducer* producer);
+    
+    srs_error_t on_consumer_data(QnConsumerData* data);
+
+private:
+    std::vector<QnConsumerData*> vec_consumer_data_;
+    std::map<std::string, QnRtcConsumer*> map_consumers_;
+    std::map<std::string, QnReqStream*> map_req_streams_;
+};
+
+
 class SrsRtcSourceManager
 {
 private:
@@ -274,6 +354,7 @@ public:
     bool has_stream_desc();
     void set_stream_desc(SrsRtcSourceDescription* stream_desc);
     std::vector<SrsRtcTrackDescription*> get_track_desc(std::string type, std::string media_type);
+    // mb20230308
     SrsRequest* get_request();
 // interface ISrsFastTimer
 private:
