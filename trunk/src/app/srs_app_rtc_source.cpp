@@ -625,7 +625,7 @@ void SrsRtcSource::set_stream_created()
 
 srs_error_t SrsRtcSource::on_publish()
 {
-    srs_trace("++++ start publish %s\n", req.get_stream_url().c_str());
+    srs_trace("++++ start publish %s\n", req->get_stream_url().c_str());
     srs_error_t err = srs_success;
 
     // update the request object.
@@ -672,7 +672,7 @@ void SrsRtcSource::on_unpublish()
         return;
     }
 
-    srs_trace("++++ stop publish %s\n", req.get_stream_url().c_str());
+    srs_trace("++++ stop publish %s\n", req->get_stream_url().c_str());
     srs_trace("cleanup when unpublish, created=%u, deliver=%u", is_created_, is_delivering_packets_);
 
     is_created_ = false;
