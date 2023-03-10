@@ -1091,6 +1091,7 @@ srs_error_t SrsRtmpConn::acquire_publish(SrsLiveSource* source)
 #ifdef SRS_RTC
     SrsRtcSource *rtc = NULL;
     // mb20230308 必须转rtc
+    srs_trace("++++ rtmp publish always bridge to rtc\n");
 //    bool rtc_server_enabled = _srs_config->get_rtc_server_enabled();
 //    bool rtc_enabled = _srs_config->get_rtc_enabled(req->vhost);
 //    if (rtc_server_enabled && rtc_enabled && !info->edge) {
