@@ -297,8 +297,8 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 {
     if (aud_packets_ > 0) {
         int64_t now = srs_update_system_time();
-        float packets_per_sec = (aud_packets_ * 1000.0f) / (now - aud_packet_tick_);
-        float bytes_per_sec = (aud_bytes_ * 1000.0f) / (now - aud_packet_tick_);
+        float packets_per_sec = (aud_packets_ * 1000000.0f) / (now - aud_packet_tick_);
+        float bytes_per_sec = (aud_bytes_ * 1000000.0f) / (now - aud_packet_tick_);
         aud_packet_tick_ = now;
         aud_packets_ = 0;
         aud_bytes_ = 0;
@@ -308,8 +308,8 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 
     if (vid_packets_ > 0) {
         int64_t now = srs_update_system_time();
-        float packets_per_sec = (vid_packets_ * 1000.0f) / (now - vid_packet_tick_);
-        float bytes_per_sec = (vid_bytes_ * 1000.0f) / (now - vid_packet_tick_);
+        float packets_per_sec = (vid_packets_ * 1000000.0f) / (now - vid_packet_tick_);
+        float bytes_per_sec = (vid_bytes_ * 1000000.0f) / (now - vid_packet_tick_);
         vid_packet_tick_ = now;
         vid_packets_ = 0;
         vid_bytes_ = 0;
