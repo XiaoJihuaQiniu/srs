@@ -302,7 +302,7 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         aud_packet_tick_ = now;
         aud_packets_ = 0;
         aud_bytes_ = 0;
-        srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bps:%.2f kbps", source_stream_url().c_str(), 
+        srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(), 
                     packets_per_sec, (bytes_per_sec * 8) / 1024);
     }
 
@@ -313,7 +313,7 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         vid_packet_tick_ = now;
         vid_packets_ = 0;
         vid_bytes_ = 0;
-        srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bps:%.2f kbps", source_stream_url().c_str(),  
+        srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(),  
                     packets_per_sec, (bytes_per_sec * 8) / 1024);
     }
 
