@@ -266,22 +266,22 @@ QnRtcConsumer::~QnRtcConsumer()
 
 void QnRtcConsumer::update_source_id()
 {
-    srs_trace("QnRtcConsumer of %s, update source_id=%s/%s of %s\n", source_stream_url(), 
+    srs_trace("QnRtcConsumer of %s, update source_id=%s/%s\n", source_stream_url().c_str(), 
                 source->source_id().c_str(), source->pre_source_id().c_str());
 }
 
 srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 {
     if (pkt->is_keyframe()) {
-        srs_trace("QnRtcConsumer of %s, recv key frame\n", source_stream_url());
+        srs_trace("QnRtcConsumer of %s, recv key frame\n", source_stream_url().c_str());
     }
 
     if (pkt->is_audio()) {
         aud_packets_++;
-        aud_bytes_ += pkt->nb_bytes();
+        aud_bytes_ += pkt->payload_bytes();
     } else {
         vid_packets_++;
-        vid_bytes_ += pkt->nb_bytes();
+        vid_bytes_ += pkt->payload_bytes();
     }
     
     srs_freep(pkt);
@@ -290,7 +290,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 
 void QnRtcConsumer::on_stream_change(SrsRtcSourceDescription* desc)
 {
-    srs_trace("QnRtcConsumer of %s, on stream change \n", source_stream_url());
+    srs_trace("QnRtcConsumer of %s, on stream change\n", source_stream_url().c_str());
 }
 
 srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
@@ -302,7 +302,7 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         aud_packet_tick_ = now;
         aud_packets_ = 0;
         aud_bytes_ = 0;
-        srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bytes_ps:%.4f", source_stream_url(), 
+        srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bytes_ps:%.4f", source_stream_url().c_str(), 
                     packets_per_sec, bytes_per_sec);
     }
 
@@ -313,20 +313,20 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         vid_packet_tick_ = now;
         vid_packets_ = 0;
         vid_bytes_ = 0;
-        srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bytes_ps:%.4f", source_stream_url(), 
+        srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bytes_ps:%.4f", source_stream_url().c_str(),  
                     packets_per_sec, bytes_per_sec);
     }
 
     return srs_success;
 }
 
-const char* QnRtcConsumer::source_stream_url()
+std::string QnRtcConsumer::source_stream_url()
 {
     if (!source) {
         return "source nil, unknow stream url";
     }
 
-    return source->get_request()->get_stream_url().c_str();
+    return source->get_request()->get_stream_url();
 }
 
 

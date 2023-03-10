@@ -117,7 +117,7 @@ public:
 
 private:
     srs_error_t on_timer(srs_utime_t interval);
-    const char* source_stream_url();
+    std::string source_stream_url();
 
 private:
     SrsRtcSource* source;

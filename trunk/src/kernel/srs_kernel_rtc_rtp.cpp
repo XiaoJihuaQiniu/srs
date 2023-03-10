@@ -872,6 +872,11 @@ void SrsRtpPacket::set_extension_types(SrsRtpExtensionTypes* v)
     return header.set_extensions(v);
 }
 
+uint64_t SrsRtpPacket::payload_bytes()
+{
+    return payload_? payload_->nb_bytes():0;
+}
+
 uint64_t SrsRtpPacket::nb_bytes()
 {
     if (!cached_payload_size) {
