@@ -100,7 +100,7 @@ public:
 };
 
 // mb20230308 自定义rtc consumer承接rtc数据
-class QnRtcConsumer
+class QnRtcConsumer : public ISrsFastTimer
 {
 public:
     QnRtcConsumer(SrsRtcSource* s);
@@ -116,10 +116,20 @@ public:
     void on_stream_change(SrsRtcSourceDescription* desc);
 
 private:
+    srs_error_t on_timer(srs_utime_t interval);
+    const char* source_stream_url();
+
+private:
     SrsRtcSource* source;
     std::vector<SrsRtpPacket*> queue;
     // when source id changed, notice all consumers
     bool should_update_source_id;
+    int64_t aud_packets_;
+    int64_t vid_packets_;
+    int64_t aud_bytes_;
+    int64_t vid_bytes_;
+    int64_t aud_packet_tick_;
+    int64_t vid_packet_tick_;
 };
 
 class SrsRtcSourceManager
@@ -264,6 +274,7 @@ public:
     bool has_stream_desc();
     void set_stream_desc(SrsRtcSourceDescription* stream_desc);
     std::vector<SrsRtcTrackDescription*> get_track_desc(std::string type, std::string media_type);
+    SrsRequest* get_request();
 // interface ISrsFastTimer
 private:
     srs_error_t on_timer(srs_utime_t interval);
