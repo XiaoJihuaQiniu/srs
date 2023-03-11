@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <srs_qn_rtc_adapter.hpp>
 #include <srs_app_hybrid.hpp>
 #include <srs_app_server.hpp>
@@ -123,43 +124,62 @@ QnTransport* QnTransport::Instance()
     return instance;
 }
 
-srs_error_t QnTransport::RequestStream(SrsRequest* req)
+srs_error_t QnTransport::RequestStream(SrsRequest* req, void* user)
 {
     srs_error_t err = srs_success;
 
     std::string stream_url = req->get_stream_url();
-    srs_trace("request stream %s\n", stream_url.c_str());
+    srs_trace("request stream %s by user:%p\n", stream_url.c_str(), user);
     auto it = map_req_streams_.find(stream_url);
     if (it != map_req_streams_.end()) {
-        it->second->enable = true;
+        QnReqStream* req_stream = it->second;
+        std::vector<void*>& users = req_stream->users;
+        if (std::find(users.begin(), users.end(), user) != users.end()) {
+            srs_warn("user already exist, user:%p\n", user);
+        } else {
+            users.push_back(user);
+            req_stream->enable = true;
+        }
+        
         return err;
     }
 
     QnReqStream* req_stream = new QnReqStream;
     req_stream->enable = true;
     req_stream->producer = NULL;
+    req_stream->users.push_back(user);
     map_req_streams_[stream_url] = req_stream;
 
     err = NewProducer(req, req_stream->producer);
     if (err != srs_success) {
         srs_error("request stream error, %s\n", SrsCplxError::description(err).c_str());
-        map_req_streams_.erase(map_req_streams_.begin());
-        delete req_stream;
+        // map_req_streams_.erase(map_req_streams_.find(stream_url));
+        // delete req_stream;
         return err;
     }
 
     return srs_success;
 }
 
-srs_error_t QnTransport::StopRequestStream(SrsRequest* req)
+srs_error_t QnTransport::StopRequestStream(SrsRequest* req, void* user)
 {
     std::string stream_url = req->get_stream_url();
     auto it = map_req_streams_.find(stream_url);
     if (it == map_req_streams_.end()) {
         srs_error("request stream %s not exist, error\n", stream_url.c_str());
     } else {
-        srs_trace("stop request stream %s\n", stream_url.c_str());
-        it->second->enable = false;
+        srs_trace("stop request stream %s by user:%p\n", stream_url.c_str(), user);
+        QnReqStream* req_stream = it->second;
+        std::vector<void*>& users = req_stream->users;
+        auto it_user = std::find(users.begin(), users.end(), user);
+        if (it_user == users.end()) {
+            srs_warn("user not exist, user:%p\n", user);
+        } else {
+            users.erase(it_user);
+            if (users.empty()) {
+                req_stream->enable = false;
+            }
+        }
     }
 
     return srs_success;

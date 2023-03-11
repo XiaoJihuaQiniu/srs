@@ -64,14 +64,6 @@ private:
 };
 
 // mb20230308 与服务器之间收发数据
-class QnReqStream
-{
-public:
-    bool enable;
-    QnRtcProducer* producer;
-};
-
-// mb20230308
 class QnConsumerData
 {
 public:
@@ -104,6 +96,14 @@ private:
 };
 
 // mb20230308
+class QnReqStream
+{
+public:
+    bool enable;
+    std::vector<void*> users;
+    QnRtcProducer* producer;
+};
+
 /***************************************************************************
   | total size(4bytes) | head size(4bytes) | head (json) | payload data | 
 *****************************************************************************/
@@ -112,8 +112,8 @@ class QnTransport
 public:
     static QnTransport* Instance();
 
-    srs_error_t RequestStream(SrsRequest* req);
-    srs_error_t StopRequestStream(SrsRequest* req);
+    srs_error_t RequestStream(SrsRequest* req, void* user);
+    srs_error_t StopRequestStream(SrsRequest* req, void* user);
     
     srs_error_t AddConsumer(QnRtcConsumer* consumer);
     
