@@ -308,7 +308,7 @@ if [[ $SRS_SRT == YES ]]; then
 fi
 if [[ $SRS_RTC == YES ]]; then
     MODULE_FILES+=("srs_app_rtc_conn" "srs_app_rtc_dtls" "srs_app_rtc_sdp" "srs_app_rtc_network"
-        "srs_app_rtc_queue" "srs_app_rtc_server" "srs_app_rtc_source" "srs_app_rtc_api")
+        "srs_app_rtc_queue" "srs_app_rtc_server" "srs_app_rtc_source" "srs_app_rtc_api" "srs_qn_rtc_adapter")
 fi
 if [[ $SRS_APM == YES ]]; then
     MODULE_FILES+=("srs_app_tencentcloud")
