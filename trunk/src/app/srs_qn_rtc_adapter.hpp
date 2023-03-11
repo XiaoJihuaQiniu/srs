@@ -45,27 +45,21 @@ private:
 
 typedef std::shared_ptr<QnDataPacket> QnDataPacket_SharePtr;
 
-class QnRtcMsg
+class QnRtcData
 {
 public:
     void SetStreamUrl(const std::string& s) { stream_url_ = s; };
     std::string& StreamUrl() { return stream_url_; };
-
-    void SetType(uint32_t type) { type_ = type; };
-    uint32_t Type() { return type_; };
-
     json& Head() { return head_; };
-
-    void SetData(const QnDataPacket_SharePtr& data) { data_ = data; };
-    QnDataPacket_SharePtr Data() { return data_; };
+    void SetDataPacket(const QnDataPacket_SharePtr& packet) { packet_ = packet; };
+    QnDataPacket_SharePtr DataPacket() { return packet_; };
 private:
     std::string stream_url_;
-    uint32_t type_;
     json head_;
-    QnDataPacket_SharePtr data_;
+    QnDataPacket_SharePtr packet_;
 };
 
-typedef std::shared_ptr<QnRtcMsg> QnRtcMsg_SharePtr;
+typedef std::shared_ptr<QnRtcData> QnRtcData_SharePtr;
 
 
 // mb20230308 自定义rtc consumer承接rtc数据
@@ -107,7 +101,7 @@ public:
     QnRtcProducer(SrsRtcSource* s);
     ~QnRtcProducer();
 
-    srs_error_t on_data(const QnRtcMsg_SharePtr& rtc_msg);
+    srs_error_t on_data(const QnRtcData_SharePtr& rtc_data);
 
     std::string source_stream_url();
 
@@ -125,11 +119,11 @@ public:
     QnRtcProducer* producer;
 };
 
-/********************************************************************************************
-  | total size(4bytes) | json offset(2bytes) | json size(2bytes) | json | raw payload data | 
-********************************************************************************************/
+/****************************************************************************************
+ | total size(4bytes) | json size(2bytes) | json offset(2bytes) | *** | json | raw data | 
+*****************************************************************************************/
 class QnTransport;
-class QnRtcManager
+class QnRtcManager : public ISrsCoroutineHandler
 {
 public:
     static QnRtcManager* Instance();
@@ -138,23 +132,29 @@ public:
     srs_error_t StopRequestStream(SrsRequest* req, void* user);
     
     srs_error_t AddConsumer(QnRtcConsumer* consumer);
-    srs_error_t OnConsumerData(const QnRtcMsg_SharePtr& rtc_msg);
+    srs_error_t OnConsumerData(const QnRtcData_SharePtr& rtc_data);
 
+    virtual srs_error_t cycle();
 private:
     QnRtcManager();
     virtual ~QnRtcManager();
 
     srs_error_t NewProducer(SrsRequest* req, QnRtcProducer* &producer);
+    srs_error_t OnProducerData(const QnDataPacket_SharePtr& packet);
 
 private:
+    SrsCoroutine* trd_;
     QnTransport* transport_;
-    std::vector<QnRtcMsg_SharePtr> vec_consumer_data_;
+    uint64_t send_unique_id_;
+    uint64_t recv_unique_id_;
+    srs_cond_t consumer_data_cond_;
+    std::vector<QnRtcData_SharePtr> vec_consumer_data_;
     std::map<std::string, QnRtcConsumer*> map_consumers_;
     std::map<std::string, QnReqStream*> map_req_streams_;
 };
 
 
-typedef std::function<void (const std::string& flag, char* data, uint32_t size)> TransRecvCbType;
+typedef std::function<void (const std::string& flag, const QnDataPacket_SharePtr& packet)> TransRecvCbType;
 
 class QnTransport
 {
@@ -162,7 +162,7 @@ public:
     QnTransport(const std::string& name, const TransRecvCbType& callback);
     virtual ~QnTransport();
 
-    virtual srs_error_t Send(char* data, uint32_t size) = 0;
+    virtual srs_error_t Send(const QnDataPacket_SharePtr& packet) = 0;
 
 private:
     std::string name_;
@@ -175,7 +175,7 @@ public:
     QnSimpleTransport(const std::string& name, const TransRecvCbType& callback);
     ~QnSimpleTransport();
 
-    virtual srs_error_t Send(char* data, uint32_t size);
+    virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
 };
 
 #endif /* QN_APP_RTC_HPP */

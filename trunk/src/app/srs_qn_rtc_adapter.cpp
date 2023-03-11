@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <exception>
 #include <srs_qn_rtc_adapter.hpp>
 #include <srs_app_hybrid.hpp>
 #include <srs_app_server.hpp>
@@ -171,7 +172,7 @@ QnRtcProducer::~QnRtcProducer()
 
 }
 
-srs_error_t QnRtcProducer::on_data(const QnRtcMsg_SharePtr& rtc_msg)
+srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
 {
     return srs_success;
 }
@@ -183,30 +184,21 @@ std::string QnRtcProducer::source_stream_url()
 }
 
 
-class QnRtcManagerMsg
-{
-public:
-    // json打包部分
-    json_value(uint64_t, SeqId, seq_id);
-    json_value(uint32_t, Type, type);
-    json_value(std::string, StreamUrl, stream_url);
-    json_value(json, RtcHead, rtc_head);
-
-    // raw数据部分
-    QnDataPacket_SharePtr data;
-
-    QnDataPacket_SharePtr Encode() { return NULL; };
-    int Decode(char* data, uint32_t size) { return 0; };
-};
-
 // mb20230308
 QnRtcManager::QnRtcManager()
 {
-    auto recv_callback = [&](const std::string& flag, char* data, uint32_t size) {
-        srs_trace("recv data from %s, size:%u\n", flag.c_str(), size);
+    auto recv_callback = [&](const std::string& flag, const QnDataPacket_SharePtr& packet) {
+        srs_trace("recv data from %s, size:%u\n", flag.c_str(), packet->Size());
+        OnProducerData(packet);
     };
 
+    send_unique_id_ = 1;
+    recv_unique_id_ = 0;
+
+    consumer_data_cond_ = srs_cond_new();
     transport_ = new QnSimpleTransport("transport", recv_callback);
+    trd_ = new SrsSTCoroutine("qnrtc-manager", this);
+    trd_->start();
 }
 
 QnRtcManager::~QnRtcManager()
@@ -295,10 +287,80 @@ srs_error_t QnRtcManager::AddConsumer(QnRtcConsumer* consumer)
 }
 
 // 传入数据必须同步处理完
-srs_error_t QnRtcManager::OnConsumerData(const QnRtcMsg_SharePtr& rtc_msg)
+srs_error_t QnRtcManager::OnConsumerData(const QnRtcData_SharePtr& rtc_data)
 {
-    vec_consumer_data_.push_back(rtc_msg);
+    vec_consumer_data_.push_back(rtc_data);
+    srs_cond_signal(consumer_data_cond_);
     return srs_success;
+}
+
+srs_error_t QnRtcManager::cycle()
+{
+    srs_error_t err = srs_success;
+    srs_trace("QnRtcManager thread running \n");
+
+    while (true) {
+        if ((err = trd_->pull()) != srs_success) {
+            return srs_error_wrap(err, "buffer cache");
+        }
+
+        if (vec_consumer_data_.empty()) {
+            srs_cond_wait(consumer_data_cond_);
+        }
+
+        auto it = vec_consumer_data_.begin();
+        if (it == vec_consumer_data_.end()) {
+            continue;
+        }
+
+        QnRtcData_SharePtr rtc_data = *it;
+        vec_consumer_data_.erase(it);
+
+        json& js = rtc_data->Head();
+        // 添加系列号以判断是否数据有丢失
+        js["rtc_unique_id"] = send_unique_id_++;
+        js["rtc_stream_url"] = rtc_data->StreamUrl();
+
+        std::string head = js.dump();
+        uint16_t js_size = static_cast<uint16_t>(head.size());
+        uint16_t js_offset = 4 + 2 + 2;
+
+        /****************************************************************************************
+         | total size(4bytes) | json size(2bytes) | json offset(2bytes) | *** | json | raw data | 
+        *****************************************************************************************/
+        uint32_t total_size = js_size + 4 + 2 + 2 + rtc_data->DataPacket()->Size();
+        QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
+
+        // big endian
+        char* data = packet->Data();
+
+        // write total_size
+        *data++ = ((total_size >> 24) & 0xff);
+        *data++ = ((total_size >> 16) & 0xff);
+        *data++ = ((total_size >> 8) & 0xff);
+        *data++ = (total_size & 0xff);
+
+        // json size
+        *data++ = ((js_size >> 8) & 0xff);
+        *data++ = (js_size & 0xff);
+        // json offset
+        *data++ = ((js_offset >> 8) & 0xff);
+        *data++ = (js_offset & 0xff);
+        
+        // json data
+        memcpy(data, head.c_str(), js_size);
+        data += js_size;
+
+        // raw payload data
+        memcpy(data, rtc_data->DataPacket()->Data(), rtc_data->DataPacket()->Size());
+
+        if (transport_) {
+            transport_->Send(packet);
+        }
+    }
+
+    srs_trace("QnRtcManager thread quit... \n");
+    return err;
 }
 
 srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
@@ -333,6 +395,77 @@ srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
     return srs_success;
 }
 
+#define json_have(j, x) (j.find(x) != j.end())
+#define json_do_default(v, x, y)    do {    \
+    try { \
+        v = x; \
+    } catch (const std::exception& e) { \
+        srs_error("%s error, %s\n", #x, e.what()); \
+        v = y; \
+    } \
+} while(0)
+
+srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
+{
+    srs_error_t err = srs_success;
+
+    // big endian
+    char* data = packet->Data();
+
+    uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+    uint16_t js_size = (data[4] << 8) | data[5];
+    uint16_t js_offset = (data[6] << 8) | data[7];
+
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+
+    json& js = rtc_data->Head();
+    std::string head(data + js_offset, js_size);
+    js = json::parse(head);
+
+    if (!json_have(js, "rtc_unique_id") || !json_have(js, "rtc_stream_url")) {
+        srs_error("producer data no rtc_unique_id or rtc_stream_url, error");
+        return err;
+    }
+
+    uint64_t unique_id;
+    json_do_default(unique_id, js["rtc_unique_id"], 0);
+    if (unique_id != recv_unique_id_ + 1) {
+        srs_warn("unique id jumped, %lld --> %lld\n", recv_unique_id_, unique_id);
+    }
+    recv_unique_id_ = unique_id;
+
+    std::string stream_url;
+    json_do_default(stream_url, js["rtc_stream_url"], "^&unknow");
+    stream_url = qn_get_play_stream(stream_url);
+
+    auto it = map_req_streams_.find(stream_url);
+    if (it == map_req_streams_.end()) {
+        return err;
+    }
+
+    QnReqStream* req_stream = it->second;
+    if (!req_stream->enable) {
+        return err;
+    }
+
+    if (!req_stream->producer) {
+        srs_warn("producer not exist, stream:%s\n", stream_url.c_str());
+        return err;
+    }
+
+    char* payload = data + js_offset + js_size;
+    uint32_t payload_size = total_size - js_size - js_offset;
+    QnDataPacket_SharePtr payload_packet = std::make_shared<QnDataPacket>(payload_size);
+    memcpy(payload_packet->Data(), payload, payload_size);
+
+    rtc_data->SetDataPacket(payload_packet);
+    rtc_data->SetStreamUrl(stream_url);
+
+    req_stream->producer->on_data(rtc_data);
+
+    return err;
+}
+
 
 QnTransport::QnTransport(const std::string& name, const TransRecvCbType& callback)
 {
@@ -354,8 +487,8 @@ QnSimpleTransport::~QnSimpleTransport()
 {
 }
 
-srs_error_t QnSimpleTransport::Send(char* data, uint32_t size)
+srs_error_t QnSimpleTransport::Send(const QnDataPacket_SharePtr& packet)
 {
-    srs_trace("simpleTransport send %u bytes\n", size);
+    srs_trace("simpleTransport send %u bytes\n", packet->Size());
     return srs_success;
 }
