@@ -32,16 +32,40 @@ public:
     QnDataPacket(uint32_t size);
     // 外部传入，在析构时会释放指针指向的空间
     QnDataPacket(char* data, uint32_t size);
+    QnDataPacket(char* data, uint32_t size, void(*pfree)(char*, uint32_t));
     ~QnDataPacket();
 
     char* Data() { return data_; };
     uint32_t Size() { return size_; };
 private:
+    void(*pfree_)(char*, uint32_t);
     char* data_;
     uint32_t size_;
 };
 
 typedef std::shared_ptr<QnDataPacket> QnDataPacket_SharePtr;
+
+class QnRtcMsg
+{
+public:
+    void SetStreamUrl(const std::string& s) { stream_url_ = s; };
+    std::string& StreamUrl() { return stream_url_; };
+
+    void SetType(uint32_t type) { type_ = type; };
+    uint32_t Type() { return type_; };
+
+    json& Head() { return head_; };
+
+    void SetData(const QnDataPacket_SharePtr& data) { data_ = data; };
+    QnDataPacket_SharePtr Data() { return data_; };
+private:
+    std::string stream_url_;
+    uint32_t type_;
+    json head_;
+    QnDataPacket_SharePtr data_;
+};
+
+typedef std::shared_ptr<QnRtcMsg> QnRtcMsg_SharePtr;
 
 
 // mb20230308 自定义rtc consumer承接rtc数据
@@ -83,7 +107,7 @@ public:
     QnRtcProducer(SrsRtcSource* s);
     ~QnRtcProducer();
 
-    srs_error_t on_data(char* data, int size);
+    srs_error_t on_data(const QnRtcMsg_SharePtr& rtc_msg);
 
     std::string source_stream_url();
 
@@ -91,20 +115,6 @@ private:
     SrsRtcSource* source_;
 };
 
-class QnConsumerData
-{
-public:
-    /* head is json format */
-    QnConsumerData(QnRtcConsumer* consumer, int32_t type, json& head, QnDataPacket_SharePtr data) : 
-                            consumer_(consumer), type_(type), head_(head), data_(data){
-    };
-
-public:
-    const QnRtcConsumer* consumer_;
-    int32_t type_;      // audio or video
-    json& head_;        // json 格式数据
-    QnDataPacket_SharePtr data_;
-};
 
 // mb20230308
 class QnReqStream
@@ -115,9 +125,9 @@ public:
     QnRtcProducer* producer;
 };
 
-/***************************************************************************
-  | total size(4bytes) | head size(4bytes) | head (json) | payload data | 
-*****************************************************************************/
+/********************************************************************************************
+  | total size(4bytes) | json offset(2bytes) | json size(2bytes) | json | raw payload data | 
+********************************************************************************************/
 class QnTransport;
 class QnRtcManager
 {
@@ -128,9 +138,7 @@ public:
     srs_error_t StopRequestStream(SrsRequest* req, void* user);
     
     srs_error_t AddConsumer(QnRtcConsumer* consumer);
-    
-    // 传入数据必须同步处理完
-    srs_error_t OnConsumerData(QnConsumerData* consumer_data);
+    srs_error_t OnConsumerData(const QnRtcMsg_SharePtr& rtc_msg);
 
 private:
     QnRtcManager();
@@ -140,7 +148,7 @@ private:
 
 private:
     QnTransport* transport_;
-    std::vector<QnDataPacket_SharePtr> vec_consumer_data_;
+    std::vector<QnRtcMsg_SharePtr> vec_consumer_data_;
     std::map<std::string, QnRtcConsumer*> map_consumers_;
     std::map<std::string, QnReqStream*> map_req_streams_;
 };

@@ -4,6 +4,11 @@
 #include <srs_app_server.hpp>
 #include <srs_app_rtc_source.hpp>
 
+#define json_value(type, v, tag) type v; const std::string tag_##v = #tag
+#define json_value_str(type, v, tag) type v; const std::string tag_##v = tag
+#define json_tag(v) tag_##v
+
+
 const std::string PLAY_STREAM_TAG = "^#@!qnplaystream$#@";
 
 // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
@@ -38,6 +43,7 @@ bool qn_is_play_stream2(const SrsRequest* req)
 
 QnDataPacket::QnDataPacket(uint32_t size)
 {
+    pfree_ = NULL;
     data_ = new char[size];
     srs_assert(data_);
     size_ = size;
@@ -46,13 +52,27 @@ QnDataPacket::QnDataPacket(uint32_t size)
 QnDataPacket::QnDataPacket(char* data, uint32_t size)
 {
     srs_assert(data);
+    pfree_ = NULL;
+    data_ = data;
+    size_ = size;
+}
+
+QnDataPacket::QnDataPacket(char* data, uint32_t size, void(*pfree)(char*, uint32_t))
+{
+    srs_assert(data);
+    pfree_ = pfree;
     data_ = data;
     size_ = size;
 }
 
 QnDataPacket::~QnDataPacket()
 {
-    delete[] data_;
+    if (!pfree_) {
+        delete[] data_;
+    } else {
+        pfree_(data_, size_);
+    }
+    
     data_ = NULL;
     size_ = 0;
 }
@@ -151,7 +171,7 @@ QnRtcProducer::~QnRtcProducer()
 
 }
 
-srs_error_t QnRtcProducer::on_data(char* data, int size)
+srs_error_t QnRtcProducer::on_data(const QnRtcMsg_SharePtr& rtc_msg)
 {
     return srs_success;
 }
@@ -162,6 +182,22 @@ std::string QnRtcProducer::source_stream_url()
     return source_->get_request()->get_stream_url();
 }
 
+
+class QnRtcManagerMsg
+{
+public:
+    // json打包部分
+    json_value(uint64_t, SeqId, seq_id);
+    json_value(uint32_t, Type, type);
+    json_value(std::string, StreamUrl, stream_url);
+    json_value(json, RtcHead, rtc_head);
+
+    // raw数据部分
+    QnDataPacket_SharePtr data;
+
+    QnDataPacket_SharePtr Encode() { return NULL; };
+    int Decode(char* data, uint32_t size) { return 0; };
+};
 
 // mb20230308
 QnRtcManager::QnRtcManager()
@@ -259,8 +295,9 @@ srs_error_t QnRtcManager::AddConsumer(QnRtcConsumer* consumer)
 }
 
 // 传入数据必须同步处理完
-srs_error_t QnRtcManager::OnConsumerData(QnConsumerData* consumer_data)
+srs_error_t QnRtcManager::OnConsumerData(const QnRtcMsg_SharePtr& rtc_msg)
 {
+    vec_consumer_data_.push_back(rtc_msg);
     return srs_success;
 }
 
