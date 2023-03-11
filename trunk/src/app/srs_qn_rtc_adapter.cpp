@@ -13,12 +13,48 @@ std::string qn_get_play_stream(const std::string& stream)
     return stream + PLAY_STREAM_TAG;
 }
 
+std::string qn_get_origin_stream(const std::string& stream)
+{
+    std::string::size_type pos;
+    if ((pos = stream.find(PLAY_STREAM_TAG)) == std::string::npos) {
+        return stream;
+    }
+
+    return stream.substr(0, pos);
+}
+
 bool qn_is_play_stream(const std::string& stream)
 {
     if (stream.find(PLAY_STREAM_TAG) == std::string::npos) {
         return false;
     }
     return true;
+}
+
+bool qn_is_play_stream2(const SrsRequest* req)
+{
+    return qn_is_play_stream(req->stream);
+}
+
+QnDataPacket::QnDataPacket(uint32_t size)
+{
+    data_ = new char[size];
+    srs_assert(data_);
+    size_ = size;
+}
+
+QnDataPacket::QnDataPacket(char* data, uint32_t size)
+{
+    srs_assert(data);
+    data_ = data;
+    size_ = size;
+}
+
+QnDataPacket::~QnDataPacket()
+{
+    delete[] data_;
+    data_ = NULL;
+    size_ = 0;
 }
 
 
@@ -128,21 +164,26 @@ std::string QnRtcProducer::source_stream_url()
 
 
 // mb20230308
-QnTransport::QnTransport()
+QnRtcManager::QnRtcManager()
+{
+    auto recv_callback = [&](const std::string& flag, char* data, uint32_t size) {
+        srs_trace("recv data from %s, size:%u\n", flag.c_str(), size);
+    };
+
+    transport_ = new QnSimpleTransport("transport", recv_callback);
+}
+
+QnRtcManager::~QnRtcManager()
 {
 }
 
-QnTransport::~QnTransport()
+QnRtcManager* QnRtcManager::Instance()
 {
-}
-
-QnTransport* QnTransport::Instance()
-{
-    static QnTransport* instance = new QnTransport;
+    static QnRtcManager* instance = new QnRtcManager;
     return instance;
 }
 
-srs_error_t QnTransport::RequestStream(SrsRequest* req, void* user)
+srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
 {
     srs_error_t err = srs_success;
 
@@ -153,9 +194,10 @@ srs_error_t QnTransport::RequestStream(SrsRequest* req, void* user)
         QnReqStream* req_stream = it->second;
         std::vector<void*>& users = req_stream->users;
         if (std::find(users.begin(), users.end(), user) != users.end()) {
-            srs_warn("user already exist, user:%p\n", user);
+            srs_warn("user already exist, user:%p, left users:%d\n", user, users.size());
         } else {
             users.push_back(user);
+            srs_trace("user inserted, user:%p, left users:%d\n", user, users.size());
             req_stream->enable = true;
         }
         
@@ -176,10 +218,11 @@ srs_error_t QnTransport::RequestStream(SrsRequest* req, void* user)
         return err;
     }
 
+    srs_trace("user inserted, user:%p, left users:%d\n", user, req_stream->users.size());
     return srs_success;
 }
 
-srs_error_t QnTransport::StopRequestStream(SrsRequest* req, void* user)
+srs_error_t QnRtcManager::StopRequestStream(SrsRequest* req, void* user)
 {
     std::string stream_url = req->get_stream_url();
     auto it = map_req_streams_.find(stream_url);
@@ -191,9 +234,10 @@ srs_error_t QnTransport::StopRequestStream(SrsRequest* req, void* user)
         std::vector<void*>& users = req_stream->users;
         auto it_user = std::find(users.begin(), users.end(), user);
         if (it_user == users.end()) {
-            srs_warn("user not exist, user:%p\n", user);
+            srs_warn("user not exist, user:%p, left users:%d\n", user, users.size());
         } else {
             users.erase(it_user);
+            srs_trace("user removed, user:%p, left users:%d\n", user, users.size());
             if (users.empty()) {
                 req_stream->enable = false;
             }
@@ -203,7 +247,7 @@ srs_error_t QnTransport::StopRequestStream(SrsRequest* req, void* user)
     return srs_success;
 }
 
-srs_error_t QnTransport::AddConsumer(QnRtcConsumer* consumer)
+srs_error_t QnRtcManager::AddConsumer(QnRtcConsumer* consumer)
 {
     std::string stream_url = consumer->source_stream_url();
     auto it = map_consumers_.find(stream_url);
@@ -214,13 +258,13 @@ srs_error_t QnTransport::AddConsumer(QnRtcConsumer* consumer)
     return srs_success;
 }
 
-srs_error_t QnTransport::on_consumer_data(QnConsumerData* data)
+// 传入数据必须同步处理完
+srs_error_t QnRtcManager::OnConsumerData(QnConsumerData* consumer_data)
 {
-    vec_consumer_data_.push_back(data);
     return srs_success;
 }
 
-srs_error_t QnTransport::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
+srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
 {
     producer = NULL;
     srs_error_t err = srs_success;
@@ -249,5 +293,32 @@ srs_error_t QnTransport::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
 
     producer = new QnRtcProducer(source);
 
+    return srs_success;
+}
+
+
+QnTransport::QnTransport(const std::string& name, const TransRecvCbType& callback)
+{
+    name_ = name;
+    recv_callback_ = callback;
+}
+
+QnTransport::~QnTransport()
+{
+}
+
+
+QnSimpleTransport::QnSimpleTransport(const std::string& name, const TransRecvCbType& callback) :
+                    QnTransport(name, callback)
+{
+}
+
+QnSimpleTransport::~QnSimpleTransport()
+{
+}
+
+srs_error_t QnSimpleTransport::Send(char* data, uint32_t size)
+{
+    srs_trace("simpleTransport send %u bytes\n", size);
     return srs_success;
 }

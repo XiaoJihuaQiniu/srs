@@ -488,10 +488,18 @@ srs_error_t SrsRtcSource::create_consumer(SrsRtcConsumer*& consumer)
 {
     srs_error_t err = srs_success;
 
+    // mb20230308
+    if (!qn_is_play_stream2(req)) {
+        return srs_error_wrap(err, "not a play stream");
+    }
+
     consumer = new SrsRtcConsumer(this);
     consumers.push_back(consumer);
 
     // TODO: FIXME: Implements edge cluster.
+
+    // mb20230308
+    QnRtcManager::Instance()->RequestStream(req, consumer);
 
     return err;
 }
@@ -521,6 +529,9 @@ void SrsRtcSource::on_consumer_destroy(SrsRtcConsumer* consumer)
             h->on_consumers_finished();
         }
     }
+
+    // mb20230308
+    QnRtcManager::Instance()->StopRequestStream(req, consumer);
 }
 
 bool SrsRtcSource::can_publish()
@@ -552,6 +563,7 @@ srs_error_t SrsRtcSource::on_publish()
     if (!qn_consumer_) {
         srs_trace("new QnRtcConsumer for source_id=%s/%s", _source_id.c_str(), _pre_source_id.c_str());
         qn_consumer_ = new QnRtcConsumer(this);
+        QnRtcManager::Instance()->AddConsumer(qn_consumer_);
     }
 
     // Notify the consumers about stream change event.

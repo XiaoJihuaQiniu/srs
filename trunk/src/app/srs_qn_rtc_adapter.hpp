@@ -1,23 +1,48 @@
 #ifndef QN_APP_RTC_HPP
 #define QN_APP_RTC_HPP
 
-#include <srs_core.hpp>
-
 #include <vector>
 #include <map>
 #include <string>
+#include <functional>
 #include <inttypes.h>
 
+#include <srs_core.hpp>
 #include <srs_protocol_st.hpp>
 #include <srs_protocol_rtmp_stack.hpp>
 #include <srs_kernel_rtc_rtp.hpp>
 #include <srs_app_hourglass.hpp>
 
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
 class SrsRtcSource;
 class SrsRtcSourceDescription;
 
 std::string qn_get_play_stream(const std::string& stream);
+std::string qn_get_origin_stream(const std::string& stream);
 bool qn_is_play_stream(const std::string& stream);
+bool qn_is_play_stream2(const SrsRequest* req);
+
+class QnDataPacket
+{
+public:
+    // 内部分配空间
+    QnDataPacket(uint32_t size);
+    // 外部传入，在析构时会释放指针指向的空间
+    QnDataPacket(char* data, uint32_t size);
+    ~QnDataPacket();
+
+    char* Data() { return data_; };
+    uint32_t Size() { return size_; };
+private:
+    char* data_;
+    uint32_t size_;
+};
+
+typedef std::shared_ptr<QnDataPacket> QnDataPacket_SharePtr;
+
 
 // mb20230308 自定义rtc consumer承接rtc数据
 class QnRtcConsumer : public ISrsFastTimer
@@ -66,36 +91,19 @@ private:
     SrsRtcSource* source_;
 };
 
-// mb20230308 与服务器之间收发数据
 class QnConsumerData
 {
 public:
     /* head is json format */
-    QnConsumerData(const QnRtcConsumer* consumer, int32_t type, char* data, char* head, 
-                            uint32_t dsize, uint32_t hsize) : 
-                            consumer_(consumer), type_(type), head_(head), data_(data), 
-                            date_size_(dsize), head_size_(hsize) {
-    };
-    
-    ~QnConsumerData() {
-        consumer_ = NULL;
-        if (head_) {
-            delete[] head_;
-            head_ = NULL;
-        }
-        if (data_) {
-            delete[] data_;
-            data_ = NULL;
-        }
+    QnConsumerData(QnRtcConsumer* consumer, int32_t type, json& head, QnDataPacket_SharePtr data) : 
+                            consumer_(consumer), type_(type), head_(head), data_(data){
     };
 
-private:
+public:
     const QnRtcConsumer* consumer_;
     int32_t type_;      // audio or video
-    char* head_;        // json 格式数据
-    char* data_;
-    uint32_t date_size_;
-    uint32_t head_size_;
+    json& head_;        // json 格式数据
+    QnDataPacket_SharePtr data_;
 };
 
 // mb20230308
@@ -110,28 +118,56 @@ public:
 /***************************************************************************
   | total size(4bytes) | head size(4bytes) | head (json) | payload data | 
 *****************************************************************************/
-class QnTransport
+class QnTransport;
+class QnRtcManager
 {
 public:
-    static QnTransport* Instance();
+    static QnRtcManager* Instance();
 
     srs_error_t RequestStream(SrsRequest* req, void* user);
     srs_error_t StopRequestStream(SrsRequest* req, void* user);
     
     srs_error_t AddConsumer(QnRtcConsumer* consumer);
     
-    srs_error_t on_consumer_data(QnConsumerData* data);
+    // 传入数据必须同步处理完
+    srs_error_t OnConsumerData(QnConsumerData* consumer_data);
 
 private:
-    QnTransport();
-    virtual ~QnTransport();
+    QnRtcManager();
+    virtual ~QnRtcManager();
 
     srs_error_t NewProducer(SrsRequest* req, QnRtcProducer* &producer);
 
 private:
-    std::vector<QnConsumerData*> vec_consumer_data_;
+    QnTransport* transport_;
+    std::vector<QnDataPacket_SharePtr> vec_consumer_data_;
     std::map<std::string, QnRtcConsumer*> map_consumers_;
     std::map<std::string, QnReqStream*> map_req_streams_;
+};
+
+
+typedef std::function<void (const std::string& flag, char* data, uint32_t size)> TransRecvCbType;
+
+class QnTransport
+{
+public:
+    QnTransport(const std::string& name, const TransRecvCbType& callback);
+    virtual ~QnTransport();
+
+    virtual srs_error_t Send(char* data, uint32_t size) = 0;
+
+private:
+    std::string name_;
+    TransRecvCbType recv_callback_;
+};
+
+class QnSimpleTransport : public QnTransport
+{
+public:
+    QnSimpleTransport(const std::string& name, const TransRecvCbType& callback);
+    ~QnSimpleTransport();
+
+    virtual srs_error_t Send(char* data, uint32_t size);
 };
 
 #endif /* QN_APP_RTC_HPP */
