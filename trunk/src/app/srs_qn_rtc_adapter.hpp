@@ -16,6 +16,9 @@
 class SrsRtcSource;
 class SrsRtcSourceDescription;
 
+std::string qn_get_play_stream(const std::string& stream);
+bool qn_is_play_stream(const std::string& stream);
+
 // mb20230308 自定义rtc consumer承接rtc数据
 class QnRtcConsumer : public ISrsFastTimer
 {

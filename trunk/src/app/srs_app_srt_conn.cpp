@@ -283,7 +283,7 @@ srs_error_t SrsMpegtsSrtConn::do_cycle()
     // 最好是判断下发布的stream名字，不能包含这个后缀
     srs_trace("++++ srt mode:%d\n", mode);
     if (mode == SrtModePull) {
-        req_->stream += "-xxxmbmbbmbmxxx";
+        req_->stream = qn_get_play_stream(req_->stream);
     }
 
     srs_trace("@srt, streamid=%s, stream_url=%s, vhost=%s, app=%s, stream=%s, param=%s",

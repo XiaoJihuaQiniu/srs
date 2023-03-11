@@ -39,6 +39,7 @@ using namespace std;
 #include <srs_app_statistic.hpp>
 #include <srs_app_recv_thread.hpp>
 #include <srs_app_http_hooks.hpp>
+#include <srs_qn_rtc_adapter.hpp>
 
 SrsBufferCache::SrsBufferCache(SrsLiveSource* s, SrsRequest* r)
 {
@@ -584,7 +585,7 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
     
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
-    req->stream += "-xxxmbmbbmbmxxx";
+    req->stream = qn_get_play_stream(req->stream);
 
     // update client ip
     req->ip = hc->remote_ip();

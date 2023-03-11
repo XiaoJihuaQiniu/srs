@@ -38,6 +38,7 @@ using namespace std;
 #include <srs_app_statistic.hpp>
 #include <srs_app_hybrid.hpp>
 #include <srs_protocol_log.hpp>
+#include <srs_qn_rtc_adapter.hpp>
 
 #define SRS_CONTEXT_IN_HLS "hls_ctx"
 
@@ -95,8 +96,8 @@ srs_error_t SrsHlsStream::serve_m3u8_ctx(ISrsHttpResponseWriter* w, ISrsHttpMess
     req->stream = srs_path_basename(r->path());
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
-    // 最好是判断下发布的stream名字，不能包含这个后缀
-    req->stream += "-xxxmbmbbmbmxxx";    
+    // 最好是判断下发布的stream名字，不能包含这个后缀 
+    req->stream = qn_get_play_stream(req->stream);
 
     // Served by us.
     *served = true;

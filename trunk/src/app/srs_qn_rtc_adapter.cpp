@@ -4,6 +4,24 @@
 #include <srs_app_server.hpp>
 #include <srs_app_rtc_source.hpp>
 
+const std::string PLAY_STREAM_TAG = "^#@!qnplaystream$#@";
+
+// mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+// 最好是判断下发布的stream名字，不能包含这个后缀
+std::string qn_get_play_stream(const std::string& stream)
+{
+    return stream + PLAY_STREAM_TAG;
+}
+
+bool qn_is_play_stream(const std::string& stream)
+{
+    if (stream.find(PLAY_STREAM_TAG) == std::string::npos) {
+        return false;
+    }
+    return true;
+}
+
+
 // mb20230308 自定义rtc consumer承接rtc数据
 QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
 {
