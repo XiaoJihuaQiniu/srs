@@ -80,6 +80,8 @@ public:
 
     std::string source_stream_url();
 
+    void Dump();
+
 private:
     srs_error_t on_timer(srs_utime_t interval);
 
@@ -92,6 +94,10 @@ private:
     int64_t vid_bytes_;
     int64_t aud_packet_tick_;
     int64_t vid_packet_tick_;
+    float   aud_packets_ps_;
+    float   aud_bitrate_;
+    float   vid_packets_ps_;
+    float   vid_bitrate_;
 };
 
 // mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
@@ -104,6 +110,8 @@ public:
     srs_error_t on_data(const QnRtcData_SharePtr& rtc_data);
 
     std::string source_stream_url();
+
+    void Dump();
 
 private:
     SrsRtcSource* source_;
@@ -123,7 +131,7 @@ public:
  | total size(4bytes) | json size(2bytes) | json offset(2bytes) | *** | json | raw data | 
 *****************************************************************************************/
 class QnTransport;
-class QnRtcManager : public ISrsCoroutineHandler
+class QnRtcManager : public ISrsCoroutineHandler, public ISrsFastTimer
 {
 public:
     static QnRtcManager* Instance();
@@ -141,6 +149,7 @@ private:
 
     srs_error_t NewProducer(SrsRequest* req, QnRtcProducer* &producer);
     srs_error_t OnProducerData(const QnDataPacket_SharePtr& packet);
+    srs_error_t on_timer(srs_utime_t interval);
 
 private:
     SrsCoroutine* trd_;

@@ -89,8 +89,13 @@ QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
     vid_bytes_ = 0;
     aud_packet_tick_ = srs_update_system_time();
     vid_packet_tick_ = srs_update_system_time();
-    if (_srs_hybrid && _srs_hybrid->timer5s()) {
-        _srs_hybrid->timer5s()->subscribe(this);
+    aud_packets_ps_ = 0.0f;
+    aud_bitrate_ = 0.0f;
+    vid_packets_ps_ = 0.0f;
+    vid_bitrate_ = 0.0f;
+
+    if (_srs_hybrid && _srs_hybrid->timer1s()) {
+        _srs_hybrid->timer1s()->subscribe(this);
     }
 }
 
@@ -133,6 +138,13 @@ std::string QnRtcConsumer::source_stream_url()
     return source_->get_request()->get_stream_url();
 }
 
+void QnRtcConsumer::Dump()
+{
+    srs_trace2("QNDUMP", "stream:%s", source_stream_url().c_str());
+    srs_trace2("QNDUMP", "audio packet_ps:%.4f, bitrate:%.2f kbps", aud_packets_ps_, aud_bitrate_);
+    srs_trace2("QNDUMP", "video packet_ps:%.4f, bitrate:%.2f kbps", vid_packets_ps_, vid_bitrate_);
+}
+
 srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 {
     if (aud_packets_ > 0) {
@@ -142,8 +154,14 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         aud_packet_tick_ = now;
         aud_packets_ = 0;
         aud_bytes_ = 0;
-        srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(), 
-                    packets_per_sec, (bytes_per_sec * 8) / 1024);
+        aud_packets_ps_ = packets_per_sec;
+        aud_bitrate_ = (bytes_per_sec * 8) / 1024;
+
+        // srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(), 
+        //             aud_packets_ps_, aud_bitrate_);
+    } else {
+        aud_packets_ps_ = 0.0f;
+        aud_bitrate_ = 0.0f;
     }
 
     if (vid_packets_ > 0) {
@@ -153,8 +171,14 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         vid_packet_tick_ = now;
         vid_packets_ = 0;
         vid_bytes_ = 0;
-        srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(),  
-                    packets_per_sec, (bytes_per_sec * 8) / 1024);
+        vid_packets_ps_ = packets_per_sec;
+        vid_bitrate_ = (bytes_per_sec * 8) / 1024;
+
+        // srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(),  
+        //             vid_packets_ps_, vid_bitrate_);
+    } else {
+        vid_packets_ps_ = 0.0f;
+        vid_bitrate_ = 0.0f;
     }
 
     return srs_success;
@@ -183,6 +207,11 @@ std::string QnRtcProducer::source_stream_url()
     return source_->get_request()->get_stream_url();
 }
 
+void QnRtcProducer::Dump()
+{
+    srs_trace2("QNDUMP", "stream:%s", qn_get_origin_stream(source_stream_url()).c_str());
+}
+
 
 // mb20230308
 QnRtcManager::QnRtcManager()
@@ -199,6 +228,10 @@ QnRtcManager::QnRtcManager()
     transport_ = new QnLoopTransport("transport", recv_callback);
     trd_ = new SrsSTCoroutine("qnrtc-manager", this);
     trd_->start();
+
+    if (_srs_hybrid && _srs_hybrid->timer5s()) {
+        _srs_hybrid->timer5s()->subscribe(this);
+    }
 }
 
 QnRtcManager::~QnRtcManager()
@@ -308,6 +341,7 @@ srs_error_t QnRtcManager::cycle()
             srs_cond_wait(consumer_data_cond_);
         }
 
+        srs_trace("consumer data wait send, %d\n", vec_consumer_data_.size());
         auto it = vec_consumer_data_.begin();
         if (it == vec_consumer_data_.end()) {
             continue;
@@ -361,38 +395,6 @@ srs_error_t QnRtcManager::cycle()
 
     srs_trace("QnRtcManager thread quit... \n");
     return err;
-}
-
-srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
-{
-    producer = NULL;
-    srs_error_t err = srs_success;
-    SrsRtcSource* source = NULL;
-
-    if ((err = _srs_rtc_sources->fetch_or_create(req, &source)) != srs_success) {
-        return srs_error_wrap(err, "create source");
-    }
-
-    SrsLiveSource *rtmp = NULL;
-    if ((err = _srs_sources->fetch_or_create(req, _srs_hybrid->srs()->instance(), &rtmp)) != srs_success) {
-        return srs_error_wrap(err, "create source");
-    }
-
-    // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
-    // especially for stream merging.
-    rtmp->set_cache(false);
-
-    SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
-    if ((err = bridge->initialize(req)) != srs_success) {
-        srs_freep(bridge);
-        return srs_error_wrap(err, "create bridge");
-    }
-
-    source->set_bridge(bridge);
-
-    producer = new QnRtcProducer(source);
-
-    return srs_success;
 }
 
 #define json_have(j, x) (j.find(x) != j.end())
@@ -466,6 +468,58 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     return err;
 }
 
+srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
+{
+    producer = NULL;
+    srs_error_t err = srs_success;
+    SrsRtcSource* source = NULL;
+
+    if ((err = _srs_rtc_sources->fetch_or_create(req, &source)) != srs_success) {
+        return srs_error_wrap(err, "create source");
+    }
+
+    SrsLiveSource *rtmp = NULL;
+    if ((err = _srs_sources->fetch_or_create(req, _srs_hybrid->srs()->instance(), &rtmp)) != srs_success) {
+        return srs_error_wrap(err, "create source");
+    }
+
+    // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
+    // especially for stream merging.
+    rtmp->set_cache(false);
+
+    SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
+    if ((err = bridge->initialize(req)) != srs_success) {
+        srs_freep(bridge);
+        return srs_error_wrap(err, "create bridge");
+    }
+
+    source->set_bridge(bridge);
+
+    producer = new QnRtcProducer(source);
+
+    return srs_success;
+}
+
+srs_error_t QnRtcManager::on_timer(srs_utime_t interval)
+{
+    srs_trace2("QNDUMP", "=> request streams:%u", map_req_streams_.size());
+    for (auto it = map_req_streams_.begin(); it != map_req_streams_.end(); it++) {
+        QnReqStream* req_stream = it->second;
+        srs_trace2("QNDUMP", "stream:%s, enable:%d, needs:%d", qn_get_origin_stream(it->first).c_str(), 
+                    req_stream->enable, req_stream->users.size());
+        req_stream->producer->Dump();
+    }
+
+    srs_trace2("QNDUMP", "=> publish streams:%u", map_consumers_.size());
+    for (auto it = map_consumers_.begin(); it != map_consumers_.end(); it++) {
+        srs_trace2("QNDUMP", "stream:%s", it->first.c_str());
+        it->second->Dump();
+    }
+
+    srs_trace2("QNDUMP", "=> consumer packets2send:%u", vec_consumer_data_.size());
+    return srs_success;
+}
+
 
 QnTransport::QnTransport(const std::string& name, const TransRecvCbType& callback)
 {
@@ -512,6 +566,7 @@ srs_error_t QnLoopTransport::cycle()
             srs_cond_wait(packet_cond_);
         }
 
+        srs_trace("packets wait transport, %d\n", vec_packets_.size());
         auto it = vec_packets_.begin();
         if (it == vec_packets_.end()) {
             continue;
