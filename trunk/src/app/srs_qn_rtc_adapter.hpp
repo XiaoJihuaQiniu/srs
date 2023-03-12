@@ -164,18 +164,26 @@ public:
 
     virtual srs_error_t Send(const QnDataPacket_SharePtr& packet) = 0;
 
-private:
+protected:
     std::string name_;
     TransRecvCbType recv_callback_;
 };
 
-class QnSimpleTransport : public QnTransport
+class QnLoopTransport : public QnTransport, public ISrsCoroutineHandler
 {
 public:
-    QnSimpleTransport(const std::string& name, const TransRecvCbType& callback);
-    ~QnSimpleTransport();
+    QnLoopTransport(const std::string& name, const TransRecvCbType& callback);
+    ~QnLoopTransport();
 
     virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
+
+private:
+    virtual srs_error_t cycle();
+
+private:
+    SrsCoroutine* trd_;
+    srs_cond_t packet_cond_;
+    std::vector<QnDataPacket_SharePtr> vec_packets_;
 };
 
 #endif /* QN_APP_RTC_HPP */

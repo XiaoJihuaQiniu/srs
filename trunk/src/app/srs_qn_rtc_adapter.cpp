@@ -196,7 +196,7 @@ QnRtcManager::QnRtcManager()
     recv_unique_id_ = 0;
 
     consumer_data_cond_ = srs_cond_new();
-    transport_ = new QnSimpleTransport("transport", recv_callback);
+    transport_ = new QnLoopTransport("transport", recv_callback);
     trd_ = new SrsSTCoroutine("qnrtc-manager", this);
     trd_->start();
 }
@@ -478,17 +478,53 @@ QnTransport::~QnTransport()
 }
 
 
-QnSimpleTransport::QnSimpleTransport(const std::string& name, const TransRecvCbType& callback) :
+QnLoopTransport::QnLoopTransport(const std::string& name, const TransRecvCbType& callback) :
                     QnTransport(name, callback)
 {
+    packet_cond_ = srs_cond_new();
+    trd_ = new SrsSTCoroutine("loop-transport", this);
+    trd_->start();
 }
 
-QnSimpleTransport::~QnSimpleTransport()
+QnLoopTransport::~QnLoopTransport()
 {
 }
 
-srs_error_t QnSimpleTransport::Send(const QnDataPacket_SharePtr& packet)
+srs_error_t QnLoopTransport::Send(const QnDataPacket_SharePtr& packet)
 {
-    srs_trace("simpleTransport send %u bytes\n", packet->Size());
+    srs_trace("LoopTransport send %u bytes\n", packet->Size());
+    vec_packets_.push_back(packet);
+    srs_cond_signal(packet_cond_);
     return srs_success;
+}
+
+srs_error_t QnLoopTransport::cycle()
+{
+    srs_error_t err = srs_success;
+    srs_trace("QnLoopTransport thread running \n");
+
+    while (true) {
+        if ((err = trd_->pull()) != srs_success) {
+            return srs_error_wrap(err, "buffer cache");
+        }
+
+        if (vec_packets_.empty()) {
+            srs_cond_wait(packet_cond_);
+        }
+
+        auto it = vec_packets_.begin();
+        if (it == vec_packets_.end()) {
+            continue;
+        }
+
+        QnDataPacket_SharePtr packet = *it;
+        vec_packets_.erase(it);
+
+        if (recv_callback_) {
+            recv_callback_(name_, packet);
+        }
+    }
+
+    srs_trace("QnLoopTransport thread quit... \n");
+    return err;
 }
