@@ -51,8 +51,8 @@ public:
     void SetStreamUrl(const std::string& s) { stream_url_ = s; };
     std::string& StreamUrl() { return stream_url_; };
     json& Head() { return head_; };
-    void SetDataPacket(const QnDataPacket_SharePtr& packet) { packet_ = packet; };
-    QnDataPacket_SharePtr DataPacket() { return packet_; };
+    void SetPayload(const QnDataPacket_SharePtr& packet) { packet_ = packet; };
+    QnDataPacket_SharePtr Payload() { return packet_; };
 private:
     std::string stream_url_;
     json head_;
@@ -78,7 +78,7 @@ public:
 
     void on_stream_change(SrsRtcSourceDescription* desc);
 
-    std::string source_stream_url();
+    std::string& source_stream_url();
 
     void Dump();
 
@@ -87,7 +87,8 @@ private:
 
 private:
     SrsRtcSource* source_;
-    std::vector<SrsRtpPacket*> queue_;
+    std::string stream_url_;
+    uint64_t unique_id_;
     int64_t aud_packets_;
     int64_t vid_packets_;
     int64_t aud_bytes_;
@@ -109,12 +110,13 @@ public:
 
     srs_error_t on_data(const QnRtcData_SharePtr& rtc_data);
 
-    std::string source_stream_url();
+    std::string& source_stream_url();
 
     void Dump();
 
 private:
     SrsRtcSource* source_;
+    std::string stream_url_;
 };
 
 

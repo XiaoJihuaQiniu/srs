@@ -82,7 +82,10 @@ QnDataPacket::~QnDataPacket()
 // mb20230308 自定义rtc consumer承接rtc数据
 QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
 {
+    SrsCplxError::srs_assert(s);
     source_ = s;
+    stream_url_ = s->get_request()->get_stream_url();
+    unique_id_ = 1;
     aud_packets_ = 0;
     vid_packets_ = 0;
     aud_bytes_ = 0;
@@ -111,6 +114,8 @@ void QnRtcConsumer::update_source_id()
 
 srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 {
+    srs_error_t err = srs_success;
+
     if (pkt->is_keyframe()) {
         srs_trace("QnRtcConsumer of %s, recv key frame\n", source_stream_url().c_str());
     }
@@ -122,8 +127,37 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
         vid_packets_++;
         vid_bytes_ += pkt->payload_bytes();
     }
+
+    char* buffer = new char[kRtpPacketSize];
+    srs_assert(buffer);
+
+    SrsBuffer enc_buffer(buffer, kRtpPacketSize);
+    if ((err = pkt->encode(&enc_buffer)) != srs_success) {
+        delete[] buffer;
+        srs_error("encode packet error\n");
+        return srs_error_wrap(err, "encode packet");
+    }
     
-    srs_freep(pkt);
+    QnDataPacket_SharePtr payload = std::make_shared<QnDataPacket>(buffer, enc_buffer.pos());
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+    rtc_data->SetPayload(payload);
+    rtc_data->SetStreamUrl(source_stream_url());
+
+    // unique_id
+    // video or audio
+    // is keyframe (video)
+    // is mark bit set (video)
+    json& js = rtc_data->Head();
+    // 添加系列号以判断是否数据有丢失
+    js["packet_id"] = unique_id_++;
+    js["pt"] = pkt->is_audio() ? "audio" : "video";
+    if (!pkt->is_audio()) {
+        js["key"] = pkt->is_keyframe() ? 1 : 0;
+        js["mark"] = pkt->header.get_marker() ? 1 : 0;
+    }
+
+    QnRtcManager::Instance()->OnConsumerData(rtc_data);
+
     return srs_success;
 }
 
@@ -132,10 +166,9 @@ void QnRtcConsumer::on_stream_change(SrsRtcSourceDescription* desc)
     srs_trace("QnRtcConsumer of %s, on stream change\n", source_stream_url().c_str());
 }
 
-std::string QnRtcConsumer::source_stream_url()
+std::string& QnRtcConsumer::source_stream_url()
 {
-    SrsCplxError::srs_assert(source_);
-    return source_->get_request()->get_stream_url();
+    return stream_url_;
 }
 
 void QnRtcConsumer::Dump()
@@ -149,8 +182,8 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 {
     if (aud_packets_ > 0) {
         int64_t now = srs_update_system_time();
-        float packets_per_sec = (aud_packets_ * 1000000.0f) / (now - aud_packet_tick_);
-        float bytes_per_sec = (aud_bytes_ * 1000000.0f) / (now - aud_packet_tick_);
+        float packets_per_sec = ((float)aud_packets_ * SRS_UTIME_SECONDS) / (now - aud_packet_tick_);
+        float bytes_per_sec = ((float)aud_bytes_ * SRS_UTIME_SECONDS) / (now - aud_packet_tick_);
         aud_packet_tick_ = now;
         aud_packets_ = 0;
         aud_bytes_ = 0;
@@ -166,8 +199,8 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 
     if (vid_packets_ > 0) {
         int64_t now = srs_update_system_time();
-        float packets_per_sec = (vid_packets_ * 1000000.0f) / (now - vid_packet_tick_);
-        float bytes_per_sec = (vid_bytes_ * 1000000.0f) / (now - vid_packet_tick_);
+        float packets_per_sec = ((float)vid_packets_ * SRS_UTIME_SECONDS) / (now - vid_packet_tick_);
+        float bytes_per_sec = ((float)vid_bytes_ * SRS_UTIME_SECONDS) / (now - vid_packet_tick_);
         vid_packet_tick_ = now;
         vid_packets_ = 0;
         vid_bytes_ = 0;
@@ -188,7 +221,9 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 // mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
 QnRtcProducer::QnRtcProducer(SrsRtcSource* s)
 {
+    SrsCplxError::srs_assert(s);
     source_ = s;
+    stream_url_ = s->get_request()->get_stream_url();
 }
 
 QnRtcProducer::~QnRtcProducer()
@@ -198,13 +233,13 @@ QnRtcProducer::~QnRtcProducer()
 
 srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
 {
+    srs_trace("producer %s recv data\n", stream_url_.c_str());
     return srs_success;
 }
 
-std::string QnRtcProducer::source_stream_url()
+std::string& QnRtcProducer::source_stream_url()
 {
-    SrsCplxError::srs_assert(source_);
-    return source_->get_request()->get_stream_url();
+    return stream_url_;
 }
 
 void QnRtcProducer::Dump()
@@ -217,7 +252,7 @@ void QnRtcProducer::Dump()
 QnRtcManager::QnRtcManager()
 {
     auto recv_callback = [&](const std::string& flag, const QnDataPacket_SharePtr& packet) {
-        srs_trace("recv data from %s, size:%u\n", flag.c_str(), packet->Size());
+        // srs_trace("recv data from %s, size:%u\n", flag.c_str(), packet->Size());
         OnProducerData(packet);
     };
 
@@ -341,7 +376,7 @@ srs_error_t QnRtcManager::cycle()
             srs_cond_wait(consumer_data_cond_);
         }
 
-        srs_trace("consumer data wait send, %d\n", vec_consumer_data_.size());
+        // srs_trace("consumer data wait send, %d\n", vec_consumer_data_.size());
         auto it = vec_consumer_data_.begin();
         if (it == vec_consumer_data_.end()) {
             continue;
@@ -352,21 +387,22 @@ srs_error_t QnRtcManager::cycle()
 
         json& js = rtc_data->Head();
         // 添加系列号以判断是否数据有丢失
-        js["rtc_unique_id"] = send_unique_id_++;
-        js["rtc_stream_url"] = rtc_data->StreamUrl();
+        js["unique_id"] = send_unique_id_++;
+        js["stream_url"] = rtc_data->StreamUrl();
 
         std::string head = js.dump();
+        // srs_trace("send js:%s\n", head.c_str());
         uint16_t js_size = static_cast<uint16_t>(head.size());
         uint16_t js_offset = 4 + 2 + 2;
 
         /****************************************************************************************
          | total size(4bytes) | json size(2bytes) | json offset(2bytes) | *** | json | raw data | 
         *****************************************************************************************/
-        uint32_t total_size = js_size + 4 + 2 + 2 + rtc_data->DataPacket()->Size();
+        uint32_t total_size = js_size + 4 + 2 + 2 + rtc_data->Payload()->Size();
         QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
 
         // big endian
-        char* data = packet->Data();
+        unsigned char* data = (unsigned char*)packet->Data();
 
         // write total_size
         *data++ = ((total_size >> 24) & 0xff);
@@ -386,7 +422,7 @@ srs_error_t QnRtcManager::cycle()
         data += js_size;
 
         // raw payload data
-        memcpy(data, rtc_data->DataPacket()->Data(), rtc_data->DataPacket()->Size());
+        memcpy(data, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
 
         if (transport_) {
             transport_->Send(packet);
@@ -412,7 +448,7 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     srs_error_t err = srs_success;
 
     // big endian
-    char* data = packet->Data();
+    unsigned char* data = (unsigned char*)packet->Data();
 
     uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
     uint16_t js_size = (data[4] << 8) | data[5];
@@ -421,23 +457,24 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
 
     json& js = rtc_data->Head();
-    std::string head(data + js_offset, js_size);
+    std::string head((char*)data + js_offset, js_size);
+    // srs_trace("recv js:%s\n", head.c_str());
     js = json::parse(head);
 
-    if (!json_have(js, "rtc_unique_id") || !json_have(js, "rtc_stream_url")) {
-        srs_error("producer data no rtc_unique_id or rtc_stream_url, error");
+    if (!json_have(js, "unique_id") || !json_have(js, "stream_url")) {
+        srs_error("producer data no unique_id or rtc_stream_url, error");
         return err;
     }
 
     uint64_t unique_id;
-    json_do_default(unique_id, js["rtc_unique_id"], 0);
+    json_do_default(unique_id, js["unique_id"], 0);
     if (unique_id != recv_unique_id_ + 1) {
         srs_warn("unique id jumped, %lld --> %lld\n", recv_unique_id_, unique_id);
     }
     recv_unique_id_ = unique_id;
 
     std::string stream_url;
-    json_do_default(stream_url, js["rtc_stream_url"], "^&unknow");
+    json_do_default(stream_url, js["stream_url"], "^&unknow");
     stream_url = qn_get_play_stream(stream_url);
 
     auto it = map_req_streams_.find(stream_url);
@@ -455,12 +492,12 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
         return err;
     }
 
-    char* payload = data + js_offset + js_size;
+    char* payload = (char*)data + js_offset + js_size;
     uint32_t payload_size = total_size - js_size - js_offset;
     QnDataPacket_SharePtr payload_packet = std::make_shared<QnDataPacket>(payload_size);
     memcpy(payload_packet->Data(), payload, payload_size);
-
-    rtc_data->SetDataPacket(payload_packet);
+    // srs_trace("total_size:%u, jsoffset:%u, jssize:%d, payload size:%u\n", total_size, js_offset, js_size, payload_size);
+    rtc_data->SetPayload(payload_packet);
     rtc_data->SetStreamUrl(stream_url);
 
     req_stream->producer->on_data(rtc_data);
@@ -546,7 +583,7 @@ QnLoopTransport::~QnLoopTransport()
 
 srs_error_t QnLoopTransport::Send(const QnDataPacket_SharePtr& packet)
 {
-    srs_trace("LoopTransport send %u bytes\n", packet->Size());
+    // srs_trace("LoopTransport send %u bytes\n", packet->Size());
     vec_packets_.push_back(packet);
     srs_cond_signal(packet_cond_);
     return srs_success;
@@ -566,7 +603,7 @@ srs_error_t QnLoopTransport::cycle()
             srs_cond_wait(packet_cond_);
         }
 
-        srs_trace("packets wait transport, %d\n", vec_packets_.size());
+        // srs_trace("packets wait transport, %d\n", vec_packets_.size());
         auto it = vec_packets_.begin();
         if (it == vec_packets_.end()) {
             continue;

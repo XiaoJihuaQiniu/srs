@@ -663,7 +663,7 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
     }
 
     if (qn_consumer_) {
-        qn_consumer_->enqueue(pkt->copy());
+        qn_consumer_->enqueue(pkt);
     }
 
     for (int i = 0; i < (int)consumers.size(); i++) {
