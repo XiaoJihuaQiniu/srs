@@ -9,6 +9,16 @@
 #define json_value_str(type, v, tag) type v; const std::string tag_##v = tag
 #define json_tag(v) tag_##v
 
+#define json_have(j, x) (j.find(x) != j.end())
+#define json_do_default(v, x, y)    do {    \
+    try { \
+        v = x; \
+    } catch (const std::exception& e) { \
+        srs_error("%s error, %s\n", #x, e.what()); \
+        v = y; \
+    } \
+} while(0)
+
 
 const std::string PLAY_STREAM_TAG = "^#@!qnplaystream$#@";
 
@@ -85,6 +95,7 @@ QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
     SrsCplxError::srs_assert(s);
     source_ = s;
     stream_url_ = s->get_request()->get_stream_url();
+    identity_ = srs_update_system_time();
     unique_id_ = 1;
     aud_packets_ = 0;
     vid_packets_ = 0;
@@ -108,7 +119,7 @@ QnRtcConsumer::~QnRtcConsumer()
 
 void QnRtcConsumer::update_source_id()
 {
-    srs_trace("QnRtcConsumer of %s, update source_id=%s/%s\n", source_stream_url().c_str(), 
+    srs_trace("QnRtcConsumer of %s, update source_id=%s/%s", source_stream_url().c_str(), 
                 source_->source_id().c_str(), source_->pre_source_id().c_str());
 }
 
@@ -116,8 +127,8 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 {
     srs_error_t err = srs_success;
 
-    if (pkt->is_keyframe()) {
-        srs_trace("QnRtcConsumer of %s, recv key frame\n", source_stream_url().c_str());
+    if (pkt->is_keyframe() && pkt->header.get_marker()) {
+        srs_trace("QnRtcConsumer of %s, recv key frame", source_stream_url().c_str());
     }
 
     if (pkt->is_audio()) {
@@ -149,9 +160,16 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     // is mark bit set (video)
     json& js = rtc_data->Head();
     // 添加系列号以判断是否数据有丢失
+    js["id"] = identity_;
     js["packet_id"] = unique_id_++;
-    js["pt"] = pkt->is_audio() ? "audio" : "video";
+    js["astime"] = pkt->get_avsync_time();
+    js["type"] = pkt->is_audio() ? "audio" : "video";
+    
+    // srs_trace("++++ stream:%s, audio:%d, key:%d, pack time:%lld\n", stream_url_.c_str(), pkt->is_audio(), 
+    //             pkt->is_keyframe(), pkt->get_avsync_time());
+
     if (!pkt->is_audio()) {
+        js["pt"] = pkt->payload_type();
         js["key"] = pkt->is_keyframe() ? 1 : 0;
         js["mark"] = pkt->header.get_marker() ? 1 : 0;
     }
@@ -164,6 +182,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 void QnRtcConsumer::on_stream_change(SrsRtcSourceDescription* desc)
 {
     srs_trace("QnRtcConsumer of %s, on stream change\n", source_stream_url().c_str());
+    identity_ = srs_update_system_time();
 }
 
 std::string& QnRtcConsumer::source_stream_url()
@@ -189,7 +208,6 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         aud_bytes_ = 0;
         aud_packets_ps_ = packets_per_sec;
         aud_bitrate_ = (bytes_per_sec * 8) / 1024;
-
         // srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(), 
         //             aud_packets_ps_, aud_bitrate_);
     } else {
@@ -206,7 +224,6 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
         vid_bytes_ = 0;
         vid_packets_ps_ = packets_per_sec;
         vid_bitrate_ = (bytes_per_sec * 8) / 1024;
-
         // srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(),  
         //             vid_packets_ps_, vid_bitrate_);
     } else {
@@ -224,6 +241,21 @@ QnRtcProducer::QnRtcProducer(SrsRtcSource* s)
     SrsCplxError::srs_assert(s);
     source_ = s;
     stream_url_ = s->get_request()->get_stream_url();
+    unique_id_ = 0;
+    aud_packets_ = 0;
+    vid_packets_ = 0;
+    aud_bytes_ = 0;
+    vid_bytes_ = 0;
+    aud_packet_tick_ = srs_update_system_time();
+    vid_packet_tick_ = srs_update_system_time();
+    aud_packets_ps_ = 0.0f;
+    aud_bitrate_ = 0.0f;
+    vid_packets_ps_ = 0.0f;
+    vid_bitrate_ = 0.0f;
+
+    if (_srs_hybrid && _srs_hybrid->timer1s()) {
+        _srs_hybrid->timer1s()->subscribe(this);
+    }
 }
 
 QnRtcProducer::~QnRtcProducer()
@@ -233,7 +265,74 @@ QnRtcProducer::~QnRtcProducer()
 
 srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
 {
-    srs_trace("producer %s recv data\n", stream_url_.c_str());
+    srs_error_t err = srs_success;
+
+    json& js = rtc_data->Head();
+    if (!json_have(js, "id") || !json_have(js, "packet_id") || 
+        !json_have(js, "type") || !json_have(js, "astime")) {
+        srs_error("producer data no packet_id or pt, error");
+        return err;
+    }
+
+    uint64_t identity;
+    json_do_default(identity, js["id"], 0);
+    if (identity != identity_) {
+        srs_trace("stream changed, %s\n", stream_url_.c_str());
+        identity_ = identity;
+    }
+
+    uint64_t unique_id;
+    json_do_default(unique_id, js["packet_id"], 0);
+    if (unique_id != unique_id_ + 1) {
+        srs_warn("stream %s unique id jumped, %lld --> %lld\n", unique_id_, unique_id);
+    }
+    unique_id_ = unique_id;
+
+    QnDataPacket_SharePtr payload = rtc_data->Payload();
+    SrsRtpPacket* pkt = new SrsRtpPacket();
+    char* p = pkt->wrap(payload->Data(), payload->Size());
+    SrsBuffer buf(p, payload->Size());
+
+    pkt->set_decode_handler(this);
+    // TODO
+    // pkt->set_extension_types(&extension_types_);
+    pkt->header.ignore_padding(false);
+
+    int pt, key, mark;
+    std::string type;
+    json_do_default(type, js["type"], "unknow");
+    if (type == "video") {
+        pkt->frame_type = SrsFrameTypeVideo;
+        json_do_default(pt, js["pt"], 0);
+        json_do_default(key, js["key"], 0);
+        json_do_default(mark, js["mark"], 0);
+        // srs_trace("%s, video packet, unique_id:%llu, pt:%d, key:%d, mark:%d, size:%u\n", stream_url_.c_str(), 
+        //             unique_id_, pt, key, mark, payload->Size());
+    } else if (type == "audio") {
+        pkt->frame_type = SrsFrameTypeAudio;
+        // srs_trace("%s, audio packet, unique_id:%llu,  size:%u\n", stream_url_.c_str(), 
+        //             unique_id_, payload->Size());
+    }
+
+    if ((err = pkt->decode(&buf)) != srs_success) {
+        return srs_error_wrap(err, "decode rtp packet");
+    }
+
+    int64_t astime;
+    json_do_default(astime, js["astime"], 0);
+    pkt->set_avsync_time(astime);
+
+    if (pkt->is_audio()) {
+        aud_packets_++;
+        aud_bytes_ += pkt->payload_bytes();
+    } else {
+        vid_packets_++;
+        vid_bytes_ += pkt->payload_bytes();
+    }
+
+    source_->on_rtp(pkt);
+
+    srs_freep(pkt);
     return srs_success;
 }
 
@@ -244,9 +343,74 @@ std::string& QnRtcProducer::source_stream_url()
 
 void QnRtcProducer::Dump()
 {
-    srs_trace2("QNDUMP", "stream:%s", qn_get_origin_stream(source_stream_url()).c_str());
+    srs_trace2("QNDUMP", "stream:%s", source_stream_url().c_str());
+    srs_trace2("QNDUMP", "audio packet_ps:%.4f, bitrate:%.2f kbps", aud_packets_ps_, aud_bitrate_);
+    srs_trace2("QNDUMP", "video packet_ps:%.4f, bitrate:%.2f kbps", vid_packets_ps_, vid_bitrate_);
 }
 
+void QnRtcProducer::on_before_decode_payload(SrsRtpPacket* pkt, SrsBuffer* buf, ISrsRtpPayloader** ppayload, SrsRtspPacketPayloadType* ppt)
+{
+    // No payload, ignore.
+    if (buf->empty()) {
+        return;
+    }
+
+    if (pkt->is_audio()) {
+        *ppayload = new SrsRtpRawPayload();
+        *ppt = SrsRtspPacketPayloadTypeRaw;
+    } else {
+        uint8_t v = (uint8_t)(buf->head()[0] & kNalTypeMask);
+        pkt->nalu_type = SrsAvcNaluType(v);
+
+        if (v == kStapA) {
+            *ppayload = new SrsRtpSTAPPayload();
+            *ppt = SrsRtspPacketPayloadTypeSTAP;
+        } else if (v == kFuA) {
+            *ppayload = new SrsRtpFUAPayload2();
+            *ppt = SrsRtspPacketPayloadTypeFUA2;
+        } else {
+            *ppayload = new SrsRtpRawPayload();
+            *ppt = SrsRtspPacketPayloadTypeRaw;
+        }
+    }
+}
+
+srs_error_t QnRtcProducer::on_timer(srs_utime_t interval)
+{
+    if (aud_packets_ > 0) {
+        int64_t now = srs_update_system_time();
+        float packets_per_sec = ((float)aud_packets_ * SRS_UTIME_SECONDS) / (now - aud_packet_tick_);
+        float bytes_per_sec = ((float)aud_bytes_ * SRS_UTIME_SECONDS) / (now - aud_packet_tick_);
+        aud_packet_tick_ = now;
+        aud_packets_ = 0;
+        aud_bytes_ = 0;
+        aud_packets_ps_ = packets_per_sec;
+        aud_bitrate_ = (bytes_per_sec * 8) / 1024;
+        // srs_trace("QnRtcConsumer of %s, audio packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(), 
+        //             aud_packets_ps_, aud_bitrate_);
+    } else {
+        aud_packets_ps_ = 0.0f;
+        aud_bitrate_ = 0.0f;
+    }
+
+    if (vid_packets_ > 0) {
+        int64_t now = srs_update_system_time();
+        float packets_per_sec = ((float)vid_packets_ * SRS_UTIME_SECONDS) / (now - vid_packet_tick_);
+        float bytes_per_sec = ((float)vid_bytes_ * SRS_UTIME_SECONDS) / (now - vid_packet_tick_);
+        vid_packet_tick_ = now;
+        vid_packets_ = 0;
+        vid_bytes_ = 0;
+        vid_packets_ps_ = packets_per_sec;
+        vid_bitrate_ = (bytes_per_sec * 8) / 1024;
+        // srs_trace("QnRtcConsumer of %s, video packet_ps:%.4f, bitrate:%.2f kbps", source_stream_url().c_str(),  
+        //             vid_packets_ps_, vid_bitrate_);
+    } else {
+        vid_packets_ps_ = 0.0f;
+        vid_bitrate_ = 0.0f;
+    }
+
+    return srs_success;
+}
 
 // mb20230308
 QnRtcManager::QnRtcManager()
@@ -354,7 +518,6 @@ srs_error_t QnRtcManager::AddConsumer(QnRtcConsumer* consumer)
     return srs_success;
 }
 
-// 传入数据必须同步处理完
 srs_error_t QnRtcManager::OnConsumerData(const QnRtcData_SharePtr& rtc_data)
 {
     vec_consumer_data_.push_back(rtc_data);
@@ -433,16 +596,6 @@ srs_error_t QnRtcManager::cycle()
     return err;
 }
 
-#define json_have(j, x) (j.find(x) != j.end())
-#define json_do_default(v, x, y)    do {    \
-    try { \
-        v = x; \
-    } catch (const std::exception& e) { \
-        srs_error("%s error, %s\n", #x, e.what()); \
-        v = y; \
-    } \
-} while(0)
-
 srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
 {
     srs_error_t err = srs_success;
@@ -462,7 +615,7 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     js = json::parse(head);
 
     if (!json_have(js, "unique_id") || !json_have(js, "stream_url")) {
-        srs_error("producer data no unique_id or rtc_stream_url, error");
+        srs_error("producer data no unique_id or stream_url, error");
         return err;
     }
 
@@ -522,7 +675,7 @@ srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
 
     // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
     // especially for stream merging.
-    rtmp->set_cache(false);
+    rtmp->set_cache(true);
 
     SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
     if ((err = bridge->initialize(req)) != srs_success) {

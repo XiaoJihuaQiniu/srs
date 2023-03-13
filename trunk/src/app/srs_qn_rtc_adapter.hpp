@@ -88,6 +88,7 @@ private:
 private:
     SrsRtcSource* source_;
     std::string stream_url_;
+    uint64_t identity_;
     uint64_t unique_id_;
     int64_t aud_packets_;
     int64_t vid_packets_;
@@ -102,7 +103,7 @@ private:
 };
 
 // mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
-class QnRtcProducer
+class QnRtcProducer : public ISrsRtspPacketDecodeHandler, public ISrsFastTimer
 {
 public:
     QnRtcProducer(SrsRtcSource* s);
@@ -111,12 +112,27 @@ public:
     srs_error_t on_data(const QnRtcData_SharePtr& rtc_data);
 
     std::string& source_stream_url();
-
     void Dump();
+
+    virtual void on_before_decode_payload(SrsRtpPacket* pkt, SrsBuffer* buf, ISrsRtpPayloader** ppayload, SrsRtspPacketPayloadType* ppt);
+private:
+    srs_error_t on_timer(srs_utime_t interval);
 
 private:
     SrsRtcSource* source_;
     std::string stream_url_;
+    uint64_t identity_;
+    uint64_t unique_id_;
+    int64_t aud_packets_;
+    int64_t vid_packets_;
+    int64_t aud_bytes_;
+    int64_t vid_bytes_;
+    int64_t aud_packet_tick_;
+    int64_t vid_packet_tick_;
+    float   aud_packets_ps_;
+    float   aud_bitrate_;
+    float   vid_packets_ps_;
+    float   vid_bitrate_;
 };
 
 

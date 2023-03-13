@@ -509,7 +509,7 @@ srs_error_t SrsRtmpConn::stream_service_cycle()
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
-    srs_trace("++++ rtmp type:%d(%s)\n", info->type, srs_client_type_string(info->type).c_str());
+    srs_trace("rtmp type:%d(%s)", info->type, srs_client_type_string(info->type).c_str());
     if (info->type == SrsRtmpConnPlay) {
         req->stream = qn_get_play_stream(req->stream);
     }

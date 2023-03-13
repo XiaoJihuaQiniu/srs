@@ -318,6 +318,7 @@ public:
     // @remark Note that return NULL if no payload.
     void set_payload(ISrsRtpPayloader* p, SrsRtspPacketPayloadType pt) { payload_ = p; payload_type_ = pt; }
     ISrsRtpPayloader* payload() { return payload_; }
+    SrsRtspPacketPayloadType payload_type() { return payload_type_; }
     // Set the padding of RTP packet.
     void set_padding(int size);
     // Increase the padding of RTP packet.

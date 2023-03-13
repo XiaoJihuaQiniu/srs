@@ -571,14 +571,16 @@ srs_error_t SrsRtcSource::on_publish()
         return srs_error_wrap(err, "source id change");
     }
 
+    // mb20230308 must request idr
     // If bridge to other source, handle event and start timer to request PLI.
-    if (bridge_) {
-        if ((err = bridge_->on_publish()) != srs_success) {
-            return srs_error_wrap(err, "bridge on publish");
-        }
+    if (true /*bridge_*/) {
+        // if ((err = bridge_->on_publish()) != srs_success) {
+        //     return srs_error_wrap(err, "bridge on publish");
+        // }
 
         // The PLI interval for RTC2RTMP.
         pli_for_rtmp_ = _srs_config->get_rtc_pli_for_rtmp(req->vhost);
+        pli_for_rtmp_ = 3 * SRS_UTIME_SECONDS;
 
         // @see SrsRtcSource::on_timer()
         _srs_hybrid->timer100ms()->subscribe(this);
@@ -665,9 +667,10 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
     if (qn_consumer_) {
         qn_consumer_->enqueue(pkt);
     }
-
+    
     for (int i = 0; i < (int)consumers.size(); i++) {
         SrsRtcConsumer* consumer = consumers.at(i);
+        srs_trace("++++ consumer %s, enqueue \n", req->get_stream_url().c_str());
         if ((err = consumer->enqueue(pkt->copy())) != srs_success) {
             return srs_error_wrap(err, "consume message");
         }
@@ -729,7 +732,6 @@ SrsRequest* SrsRtcSource::get_request()
 srs_error_t SrsRtcSource::on_timer(srs_utime_t interval)
 {
     srs_error_t err = srs_success;
-
     if (!publish_stream_) {
         return err;
     }
@@ -745,7 +747,7 @@ srs_error_t SrsRtcSource::on_timer(srs_utime_t interval)
 
     for (int i = 0; i < (int)stream_desc_->video_track_descs_.size(); i++) {
         SrsRtcTrackDescription* desc = stream_desc_->video_track_descs_.at(i);
-        srs_trace("RTC: to rtmp bridge request key frame, ssrc=%u, publisher cid=%s", desc->ssrc_, publish_stream_->context_id().c_str());
+        srs_trace("RTC: request key frame, ssrc=%u, publisher cid=%s", desc->ssrc_, publish_stream_->context_id().c_str());
         publish_stream_->request_keyframe(desc->ssrc_, publish_stream_->context_id());
     }
 
@@ -1430,6 +1432,8 @@ srs_error_t SrsRtmpFromRtcBridge::on_rtp(SrsRtpPacket *pkt)
     if (!pkt->payload()) {
         return err;
     }
+
+    // srs_trace("rtmp from rtc, packet audio:%d, ts:%lld", pkt->is_audio(), pkt->get_avsync_time());
 
     // Have no received any sender report, can't calculate avsync_time, 
     // discard it to avoid timestamp problem in live source
