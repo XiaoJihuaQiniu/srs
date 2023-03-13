@@ -244,6 +244,16 @@ srs_error_t QnRtcConsumer::on_timer(srs_utime_t interval)
 }
 
 
+// 以下常量拷贝自 srs_app_rtc_source.cpp
+// Firefox defaults as 109, Chrome is 111.
+const int kAudioPayloadType     = 111;
+const int kAudioChannel         = 2;
+const int kAudioSamplerate      = 48000;
+
+// Firefox defaults as 126, Chrome is 102.
+const int kVideoPayloadType = 102;
+const int kVideoSamplerate  = 90000;
+
 // mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
 QnRtcProducer::QnRtcProducer(SrsRtcSource* s)
 {
@@ -252,6 +262,30 @@ QnRtcProducer::QnRtcProducer(SrsRtcSource* s)
     stream_url_ = s->get_request()->get_stream_url();
     source_id_ = "unknow";
     unique_id_ = 0;
+
+    // audio track ssrc
+    if (true) {
+        std::vector<SrsRtcTrackDescription*> descs = source_->get_track_desc("audio", "opus");
+        if (!descs.empty()) {
+            audio_ssrc_ = descs.at(0)->ssrc_;
+        }
+        // Note we must use the PT of source, see https://github.com/ossrs/srs/pull/3079
+        audio_payload_type_ = descs.empty() ? kAudioPayloadType : descs.front()->media_->pt_;
+    }
+
+    // video track ssrc
+    if (true) {
+        std::vector<SrsRtcTrackDescription*> descs = source_->get_track_desc("video", "H264");
+        if (!descs.empty()) {
+            video_ssrc_ = descs.at(0)->ssrc_;
+        }
+        // Note we must use the PT of source, see https://github.com/ossrs/srs/pull/3079
+        video_payload_type_ = descs.empty() ? kVideoPayloadType : descs.front()->media_->pt_;
+    }
+
+    srs_trace("producer %s,  aud ssrc:%u, pt:%hhu, vid ssrc:%u, pt:%hhu\n", stream_url_.c_str(), 
+               audio_ssrc_, audio_payload_type_, video_ssrc_, video_payload_type_);
+
     aud_packets_ = 0;
     vid_packets_ = 0;
     aud_bytes_ = 0;
@@ -295,7 +329,7 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
     uint64_t unique_id;
     json_do_default(unique_id, js[PACKET_ID], 0);
     if (unique_id != unique_id_ + 1) {
-        srs_warn("stream %s unique id jumped, %lld --> %lld\n", stream_url_.c_str(), unique_id_, unique_id);
+        srs_warn("producer %s unique id jumped, %lld --> %lld\n", stream_url_.c_str(), unique_id_, unique_id);
     }
     unique_id_ = unique_id;
 
@@ -334,9 +368,13 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
     pkt->set_avsync_time(astime);
 
     if (pkt->is_audio()) {
+        pkt->header.set_payload_type(audio_payload_type_);
+        pkt->header.set_ssrc(audio_ssrc_);
         aud_packets_++;
         aud_bytes_ += pkt->payload_bytes();
     } else {
+        pkt->header.set_payload_type(video_payload_type_);
+        pkt->header.set_ssrc(video_ssrc_);
         vid_packets_++;
         vid_bytes_ += pkt->payload_bytes();
     }

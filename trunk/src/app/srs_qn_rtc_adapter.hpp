@@ -125,6 +125,12 @@ private:
     std::string source_id_;
     uint64_t identity_;
     uint64_t unique_id_;
+
+    uint32_t audio_ssrc_;
+    uint32_t video_ssrc_;
+    uint8_t audio_payload_type_;
+    uint8_t video_payload_type_;
+
     int64_t aud_packets_;
     int64_t vid_packets_;
     int64_t aud_bytes_;
