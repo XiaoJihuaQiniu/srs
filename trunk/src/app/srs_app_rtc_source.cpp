@@ -1000,6 +1000,8 @@ srs_error_t SrsRtcFromRtmpBridge::package_opus(SrsAudioFrame* audio, SrsRtpPacke
     pkt->header.set_marker(true);
     pkt->header.set_sequence(audio_sequence++);
     pkt->header.set_timestamp(audio->dts * 48);
+    // mb20230308
+    pkt->set_avsync_time(audio->dts);
 
     SrsRtpRawPayload* raw = new SrsRtpRawPayload();
     pkt->set_payload(raw, SrsRtspPacketPayloadTypeRaw);
@@ -1145,6 +1147,8 @@ srs_error_t SrsRtcFromRtmpBridge::package_stap_a(SrsRtcSource* source, SrsShared
     pkt->header.set_marker(false);
     pkt->header.set_sequence(video_sequence++);
     pkt->header.set_timestamp(msg->timestamp * 90);
+    // mb20230308
+    pkt->set_avsync_time(msg->timestamp);
 
     SrsRtpSTAPPayload* stap = new SrsRtpSTAPPayload();
     pkt->set_payload(stap, SrsRtspPacketPayloadTypeSTAP);
@@ -1226,6 +1230,9 @@ srs_error_t SrsRtcFromRtmpBridge::package_nalus(SrsSharedPtrMessage* msg, const 
         pkt->nalu_type = (SrsAvcNaluType)first_nalu_type;
         pkt->header.set_sequence(video_sequence++);
         pkt->header.set_timestamp(msg->timestamp * 90);
+        // mb20230308
+        pkt->set_avsync_time(msg->timestamp);
+
         pkt->set_payload(raw, SrsRtspPacketPayloadTypeNALU);
         pkt->wrap(msg);
     } else {
@@ -1260,6 +1267,8 @@ srs_error_t SrsRtcFromRtmpBridge::package_nalus(SrsSharedPtrMessage* msg, const 
             pkt->nalu_type = (SrsAvcNaluType)kFuA;
             pkt->header.set_sequence(video_sequence++);
             pkt->header.set_timestamp(msg->timestamp * 90);
+            // mb20230308
+            pkt->set_avsync_time(msg->timestamp);
 
             fua->nri = (SrsAvcNaluType)header;
             fua->nalu_type = (SrsAvcNaluType)nal_type;
@@ -1281,14 +1290,21 @@ srs_error_t SrsRtcFromRtmpBridge::package_single_nalu(SrsSharedPtrMessage* msg, 
 {
     srs_error_t err = srs_success;
 
+    uint8_t header = sample->bytes[0];
+    uint8_t nal_type = header & kNalTypeMask;
+
     SrsRtpPacket* pkt = new SrsRtpPacket();
     pkts.push_back(pkt);
 
     pkt->header.set_payload_type(video_payload_type_);
     pkt->header.set_ssrc(video_ssrc);
     pkt->frame_type = SrsFrameTypeVideo;
+    // mb20230308, here is a bug
+    pkt->nalu_type = (SrsAvcNaluType)nal_type;
     pkt->header.set_sequence(video_sequence++);
     pkt->header.set_timestamp(msg->timestamp * 90);
+    // mb20230308
+    pkt->set_avsync_time(msg->timestamp);
 
     SrsRtpRawPayload* raw = new SrsRtpRawPayload();
     pkt->set_payload(raw, SrsRtspPacketPayloadTypeRaw);
@@ -1320,8 +1336,12 @@ srs_error_t SrsRtcFromRtmpBridge::package_fu_a(SrsSharedPtrMessage* msg, SrsSamp
         pkt->header.set_payload_type(video_payload_type_);
         pkt->header.set_ssrc(video_ssrc);
         pkt->frame_type = SrsFrameTypeVideo;
+        // mb20230308, here is a bug
+        pkt->nalu_type = (SrsAvcNaluType)kFuA;
         pkt->header.set_sequence(video_sequence++);
         pkt->header.set_timestamp(msg->timestamp * 90);
+        // mb20230308
+        pkt->set_avsync_time(msg->timestamp);
 
         SrsRtpFUAPayload2* fua = new SrsRtpFUAPayload2();
         pkt->set_payload(fua, SrsRtspPacketPayloadTypeFUA2);

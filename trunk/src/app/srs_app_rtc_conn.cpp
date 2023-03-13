@@ -541,14 +541,15 @@ void SrsRtcPlayStream::on_stream_change(SrsRtcSourceDescription* desc)
         }
     }
 
+    // mb20230308
     // Request keyframe(PLI) when stream changed.
-    if (desc->audio_track_desc_) {
-        pli_worker_->request_keyframe(desc->audio_track_desc_->ssrc_, cid_);
-    }
-    for (vector<SrsRtcTrackDescription*>::iterator it = desc->video_track_descs_.begin(); it != desc->video_track_descs_.end(); ++it) {
-        SrsRtcTrackDescription* vdesc = *it;
-        pli_worker_->request_keyframe(vdesc->ssrc_, cid_);
-    }
+    // if (desc->audio_track_desc_) {
+    //     pli_worker_->request_keyframe(desc->audio_track_desc_->ssrc_, cid_);
+    // }
+    // for (vector<SrsRtcTrackDescription*>::iterator it = desc->video_track_descs_.begin(); it != desc->video_track_descs_.end(); ++it) {
+    //     SrsRtcTrackDescription* vdesc = *it;
+    //     pli_worker_->request_keyframe(vdesc->ssrc_, cid_);
+    // }
 }
 
 srs_error_t SrsRtcPlayStream::on_reload_vhost_play(string vhost)
@@ -864,7 +865,8 @@ srs_error_t SrsRtcPlayStream::on_rtcp_ps_feedback(SrsRtcpPsfbCommon* rtcp)
         case kPLI: {
             uint32_t ssrc = get_video_publish_ssrc(rtcp->get_media_ssrc());
             if (ssrc) {
-                pli_worker_->request_keyframe(ssrc, cid_);
+                // mb20230308
+                // pli_worker_->request_keyframe(ssrc, cid_);
             }
             break;
         }

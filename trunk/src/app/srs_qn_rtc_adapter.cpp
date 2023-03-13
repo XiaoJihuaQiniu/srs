@@ -126,7 +126,7 @@ QnRtcConsumer::~QnRtcConsumer()
 
 void QnRtcConsumer::update_source_id()
 {
-    srs_trace("QnRtcConsumer of %s, update source_id=%s/%s", source_stream_url().c_str(), 
+    srs_trace("QnRtcConsumer of %s, update source_id=%s/%s", stream_url_.c_str(), 
                 source_->source_id().c_str(), source_->pre_source_id().c_str());
 }
 
@@ -134,8 +134,8 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 {
     srs_error_t err = srs_success;
 
-    if (pkt->is_keyframe() && pkt->header.get_marker()) {
-        srs_trace("QnRtcConsumer of %s, recv key frame", source_stream_url().c_str());
+    if (pkt->is_keyframe() /* && pkt->header.get_marker() */) {
+        srs_trace("--> QnRtcConsumer of %s, recv key frame, ts:%lld", stream_url_.c_str(), pkt->get_avsync_time());
     }
 
     if (pkt->is_audio()) {
@@ -159,7 +159,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     QnDataPacket_SharePtr payload = std::make_shared<QnDataPacket>(buffer, enc_buffer.pos());
     QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
     rtc_data->SetPayload(payload);
-    rtc_data->SetStreamUrl(source_stream_url());
+    rtc_data->SetStreamUrl(stream_url_);
 
     // unique_id
     // video or audio
@@ -172,8 +172,8 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     js[ASTIME] = pkt->get_avsync_time();
     js[MTYPE] = pkt->is_audio() ? "audio" : "video";
     
-    // srs_trace("++++ stream:%s, audio:%d, key:%d, pack time:%lld\n", stream_url_.c_str(), pkt->is_audio(), 
-    //             pkt->is_keyframe(), pkt->get_avsync_time());
+    // srs_trace("++++ stream:%s, pt:%d, audio:%d, key:%d, mark:%d, pack time:%lld\n", stream_url_.c_str(), pkt->payload_type(), 
+    //             pkt->is_audio(), pkt->is_keyframe(), pkt->header.get_marker(), pkt->get_avsync_time());
 
     if (!pkt->is_audio()) {
         js[PAYLOAD_TYPE] = pkt->payload_type();
@@ -188,7 +188,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 
 void QnRtcConsumer::on_stream_change(SrsRtcSourceDescription* desc)
 {
-    srs_trace("QnRtcConsumer of %s, on stream change\n", source_stream_url().c_str());
+    srs_trace("QnRtcConsumer of %s, on stream change\n", stream_url_.c_str());
     identity_ = srs_update_system_time();
 }
 
@@ -199,7 +199,7 @@ std::string& QnRtcConsumer::source_stream_url()
 
 void QnRtcConsumer::Dump()
 {
-    srs_trace2("QNDUMP", "stream:%s", source_stream_url().c_str());
+    srs_trace2("QNDUMP", "stream:%s", stream_url_.c_str());
     srs_trace2("QNDUMP", "audio packet_ps:%.4f, bitrate:%.2f kbps", aud_packets_ps_, aud_bitrate_);
     srs_trace2("QNDUMP", "video packet_ps:%.4f, bitrate:%.2f kbps", vid_packets_ps_, vid_bitrate_);
 }
@@ -337,6 +337,11 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
         vid_bytes_ += pkt->payload_bytes();
     }
 
+    if (pkt->is_keyframe() /* && pkt->header.get_marker() */) {
+        srs_trace("<-- QnRtcProducer of %s, recv key frame, ts:%lld", qn_get_origin_stream(stream_url_).c_str(), 
+                    pkt->get_avsync_time());
+    }
+    
     source_->on_rtp(pkt);
 
     srs_freep(pkt);
@@ -350,7 +355,7 @@ std::string& QnRtcProducer::source_stream_url()
 
 void QnRtcProducer::Dump()
 {
-    srs_trace2("QNDUMP", "stream:%s", source_stream_url().c_str());
+    srs_trace2("QNDUMP", "stream:%s", qn_get_origin_stream(stream_url_).c_str());
     srs_trace2("QNDUMP", "audio packet_ps:%.4f, bitrate:%.2f kbps", aud_packets_ps_, aud_bitrate_);
     srs_trace2("QNDUMP", "video packet_ps:%.4f, bitrate:%.2f kbps", vid_packets_ps_, vid_bitrate_);
 }
