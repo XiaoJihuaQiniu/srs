@@ -88,6 +88,13 @@ QnDataPacket::~QnDataPacket()
     size_ = 0;
 }
 
+const std::string ID = "id";
+const std::string PACKET_ID = "packet_id";
+const std::string ASTIME = "astime";
+const std::string MTYPE = "mtype";
+const std::string PAYLOAD_TYPE = "pt";
+const std::string MARK_BIT = "mark";
+const std::string KEY_FRAME = "key";
 
 // mb20230308 自定义rtc consumer承接rtc数据
 QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
@@ -160,18 +167,18 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     // is mark bit set (video)
     json& js = rtc_data->Head();
     // 添加系列号以判断是否数据有丢失
-    js["id"] = identity_;
-    js["packet_id"] = unique_id_++;
-    js["astime"] = pkt->get_avsync_time();
-    js["type"] = pkt->is_audio() ? "audio" : "video";
+    js[ID] = identity_;
+    js[PACKET_ID] = unique_id_++;
+    js[ASTIME] = pkt->get_avsync_time();
+    js[MTYPE] = pkt->is_audio() ? "audio" : "video";
     
     // srs_trace("++++ stream:%s, audio:%d, key:%d, pack time:%lld\n", stream_url_.c_str(), pkt->is_audio(), 
     //             pkt->is_keyframe(), pkt->get_avsync_time());
 
     if (!pkt->is_audio()) {
-        js["pt"] = pkt->payload_type();
-        js["key"] = pkt->is_keyframe() ? 1 : 0;
-        js["mark"] = pkt->header.get_marker() ? 1 : 0;
+        js[PAYLOAD_TYPE] = pkt->payload_type();
+        js[KEY_FRAME] = pkt->is_keyframe() ? 1 : 0;
+        js[MARK_BIT] = pkt->header.get_marker() ? 1 : 0;
     }
 
     QnRtcManager::Instance()->OnConsumerData(rtc_data);
@@ -268,23 +275,23 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
     srs_error_t err = srs_success;
 
     json& js = rtc_data->Head();
-    if (!json_have(js, "id") || !json_have(js, "packet_id") || 
-        !json_have(js, "type") || !json_have(js, "astime")) {
+    if (!json_have(js, ID) || !json_have(js, PACKET_ID) || 
+        !json_have(js, MTYPE) || !json_have(js, ASTIME)) {
         srs_error("producer data no packet_id or pt, error");
         return err;
     }
 
     uint64_t identity;
-    json_do_default(identity, js["id"], 0);
+    json_do_default(identity, js[ID], 0);
     if (identity != identity_) {
         srs_trace("stream changed, %s\n", stream_url_.c_str());
         identity_ = identity;
     }
 
     uint64_t unique_id;
-    json_do_default(unique_id, js["packet_id"], 0);
+    json_do_default(unique_id, js[PACKET_ID], 0);
     if (unique_id != unique_id_ + 1) {
-        srs_warn("stream %s unique id jumped, %lld --> %lld\n", unique_id_, unique_id);
+        srs_warn("stream %s unique id jumped, %lld --> %lld\n", stream_url_.c_str(), unique_id_, unique_id);
     }
     unique_id_ = unique_id;
 
@@ -298,14 +305,14 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
     // pkt->set_extension_types(&extension_types_);
     pkt->header.ignore_padding(false);
 
-    int pt, key, mark;
+    // int pt, key, mark;
     std::string type;
-    json_do_default(type, js["type"], "unknow");
+    json_do_default(type, js[MTYPE], "unknow");
     if (type == "video") {
         pkt->frame_type = SrsFrameTypeVideo;
-        json_do_default(pt, js["pt"], 0);
-        json_do_default(key, js["key"], 0);
-        json_do_default(mark, js["mark"], 0);
+        // json_do_default(pt, js[PAYLOAD_TYPE], 0);
+        // json_do_default(key, js[KEY_FRAME], 0);
+        // json_do_default(mark, js[MARK_BIT], 0);
         // srs_trace("%s, video packet, unique_id:%llu, pt:%d, key:%d, mark:%d, size:%u\n", stream_url_.c_str(), 
         //             unique_id_, pt, key, mark, payload->Size());
     } else if (type == "audio") {
@@ -319,7 +326,7 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
     }
 
     int64_t astime;
-    json_do_default(astime, js["astime"], 0);
+    json_do_default(astime, js[ASTIME], 0);
     pkt->set_avsync_time(astime);
 
     if (pkt->is_audio()) {
@@ -489,6 +496,7 @@ srs_error_t QnRtcManager::StopRequestStream(SrsRequest* req, void* user)
     if (it == map_req_streams_.end()) {
         srs_error("request stream %s not exist, error\n", stream_url.c_str());
     } else {
+        // todo
         srs_trace("stop request stream %s by user:%p\n", stream_url.c_str(), user);
         QnReqStream* req_stream = it->second;
         std::vector<void*>& users = req_stream->users;
@@ -697,7 +705,9 @@ srs_error_t QnRtcManager::on_timer(srs_utime_t interval)
         QnReqStream* req_stream = it->second;
         srs_trace2("QNDUMP", "stream:%s, enable:%d, needs:%d", qn_get_origin_stream(it->first).c_str(), 
                     req_stream->enable, req_stream->users.size());
-        req_stream->producer->Dump();
+        if (req_stream->producer) {
+            req_stream->producer->Dump();
+        }
     }
 
     srs_trace2("QNDUMP", "=> publish streams:%u", map_consumers_.size());
