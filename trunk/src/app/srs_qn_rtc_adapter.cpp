@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <exception>
+#include <unistd.h>
 #include <srs_qn_rtc_adapter.hpp>
 #include <srs_app_hybrid.hpp>
 #include <srs_app_server.hpp>
@@ -201,7 +202,7 @@ std::string& QnRtcConsumer::source_stream_url()
 
 void QnRtcConsumer::Dump()
 {
-    srs_trace2("QNDUMP", "stream:%s", stream_url_.c_str());
+    srs_trace2("QNDUMP", "consumer stream:%s", stream_url_.c_str());
     srs_trace2("QNDUMP", "audio packet_ps:%.4f, bitrate:%.2f kbps", aud_packets_ps_, aud_bitrate_);
     srs_trace2("QNDUMP", "video packet_ps:%.4f, bitrate:%.2f kbps", vid_packets_ps_, vid_bitrate_);
 }
@@ -398,7 +399,7 @@ std::string& QnRtcProducer::source_stream_url()
 
 void QnRtcProducer::Dump()
 {
-    srs_trace2("QNDUMP", "stream:%s", qn_get_origin_stream(stream_url_).c_str());
+    srs_trace2("QNDUMP", "producer stream:%s", qn_get_origin_stream(stream_url_).c_str());
     srs_trace2("QNDUMP", "audio packet_ps:%.4f, bitrate:%.2f kbps", aud_packets_ps_, aud_bitrate_);
     srs_trace2("QNDUMP", "video packet_ps:%.4f, bitrate:%.2f kbps", vid_packets_ps_, vid_bitrate_);
 }
@@ -479,7 +480,7 @@ QnRtcManager::QnRtcManager()
     recv_unique_id_ = 0;
 
     consumer_data_cond_ = srs_cond_new();
-    transport_ = new QnLoopTransport("transport", recv_callback);
+    transport_ = new QnSocketPairTransport("transport", recv_callback);
     trd_ = new SrsSTCoroutine("qnrtc-manager", this);
     trd_->start();
 
@@ -731,7 +732,8 @@ srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
 
     // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
     // especially for stream merging.
-    rtmp->set_cache(true);
+    // TODO
+    rtmp->set_cache(false);
 
     SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
     if ((err = bridge->initialize(req)) != srs_success) {
@@ -748,23 +750,23 @@ srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
 
 srs_error_t QnRtcManager::on_timer(srs_utime_t interval)
 {
-    srs_trace2("QNDUMP", "=> request streams:%u", map_req_streams_.size());
+    srs_trace2("QNDUMP", "<== request streams:%u", map_req_streams_.size());
     for (auto it = map_req_streams_.begin(); it != map_req_streams_.end(); it++) {
         QnReqStream* req_stream = it->second;
-        srs_trace2("QNDUMP", "stream:%s, enable:%d, needs:%d", qn_get_origin_stream(it->first).c_str(), 
+        srs_trace2("QNDUMP", "[ %s, enable:%d, needs:%d ]", qn_get_origin_stream(it->first).c_str(), 
                     req_stream->enable, req_stream->users.size());
         if (req_stream->producer) {
             req_stream->producer->Dump();
         }
     }
 
-    srs_trace2("QNDUMP", "=> publish streams:%u", map_consumers_.size());
+    srs_trace2("QNDUMP", "==> publish streams:%u", map_consumers_.size());
     for (auto it = map_consumers_.begin(); it != map_consumers_.end(); it++) {
-        srs_trace2("QNDUMP", "stream:%s", it->first.c_str());
+        srs_trace2("QNDUMP", "[ %s ]", it->first.c_str());
         it->second->Dump();
     }
 
-    srs_trace2("QNDUMP", "=> consumer packets2send:%u", vec_consumer_data_.size());
+    srs_trace2("QNDUMP", "==> consumer packets2send:%u", vec_consumer_data_.size());
     return srs_success;
 }
 
@@ -829,5 +831,103 @@ srs_error_t QnLoopTransport::cycle()
     }
 
     srs_trace("QnLoopTransport thread quit... \n");
+    return err;
+}
+
+
+QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback) :
+                                                QnTransport(name, callback)
+{
+    max_buf_size_ = 2048;
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, fds_) < 0) {
+        srs_error("error %d on socketpair\n", errno);
+    }
+
+    auto f = [&]() {
+        srs_trace("trans thread start");
+        char* buffer = new char[max_buf_size_];
+        while (true) {
+            auto read_size = read(fds_[1], buffer, max_buf_size_);
+            if (read_size > 0) {
+                write(fds_[1], buffer, read_size);
+            }
+        }
+        srs_trace("trans thread quit...");
+    };
+
+    trans_thread_ = new std::thread(f);
+    trans_thread_->detach();
+
+    rwfd_ = srs_netfd_open(fds_[0]);
+    packet_cond_ = srs_cond_new();
+    trd_ = new SrsSTCoroutine("sockpair-transport", this);
+    trd_->start();
+}
+
+QnSocketPairTransport::~QnSocketPairTransport()
+{
+
+}
+
+srs_error_t QnSocketPairTransport::Send(const QnDataPacket_SharePtr& packet)
+{
+    srs_error_t err = srs_success;
+    ssize_t write_size = srs_write(rwfd_, packet->Data(), packet->Size(), 2000000);
+    if (write_size < 0) {
+        srs_trace("st write error %s(%d)", strerror(errno), errno);
+        return srs_error_wrap(err, "st_write error");
+    }
+
+    if (write_size < packet->Size()) {
+        srs_trace("st write timeout %s(%d)", strerror(errno), errno);
+        return srs_error_wrap(err, "st_write timeout");
+    }
+
+    return err;
+}
+
+srs_error_t QnSocketPairTransport::cycle()
+{
+    srs_error_t err = srs_success;
+    srs_trace("QnSocketPairTransport thread running \n");
+
+    char* buffer = NULL;
+
+    while (true) {
+        if ((err = trd_->pull()) != srs_success) {
+            return srs_error_wrap(err, "buffer cache");
+        }
+
+        if (!buffer) {
+            buffer = new char[max_buf_size_];
+            if (!buffer) {
+                srs_error("new buffer error");
+                srs_usleep(10000);
+                continue;
+            }
+        }        
+
+        ssize_t read_size = srs_read(rwfd_, buffer, max_buf_size_, 2000000);
+        if (read_size <= 0) {
+            srs_trace("st read error %s(%d)", strerror(errno), errno);
+            continue;
+        }
+
+        if (read_size == 0) {
+            continue;
+        }
+
+        if (recv_callback_) {
+            QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(buffer, read_size);
+            buffer = NULL;
+            recv_callback_(name_, packet);
+        }
+    }
+
+    if (buffer) {
+        delete[] buffer;
+    }
+
+    srs_trace("QnSocketPairTransport thread quit... \n");
     return err;
 }

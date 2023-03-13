@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <thread>
 #include <functional>
 #include <inttypes.h>
 
@@ -219,6 +220,26 @@ private:
     SrsCoroutine* trd_;
     srs_cond_t packet_cond_;
     std::vector<QnDataPacket_SharePtr> vec_packets_;
+};
+
+class QnSocketPairTransport : public QnTransport, public ISrsCoroutineHandler
+{
+public:
+    QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback);
+    ~QnSocketPairTransport();
+
+    virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
+
+private:
+    virtual srs_error_t cycle();
+
+private:
+    int fds_[2];
+    srs_netfd_t rwfd_;
+    SrsCoroutine* trd_;
+    srs_cond_t packet_cond_;
+    size_t max_buf_size_;
+    std::thread* trans_thread_;
 };
 
 #endif /* QN_APP_RTC_HPP */
