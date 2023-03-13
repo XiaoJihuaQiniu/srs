@@ -514,6 +514,7 @@ srs_error_t SrsRtcPlayStream::initialize(SrsRequest* req, std::map<uint32_t, Srs
 
 void SrsRtcPlayStream::on_stream_change(SrsRtcSourceDescription* desc)
 {
+    srs_trace("RtcPlayStream on stream changed, desc:%p", desc);
     if (!desc) return;
 
     // Refresh the relation for audio.
@@ -525,6 +526,7 @@ void SrsRtcPlayStream::on_stream_change(SrsRtcSourceDescription* desc)
 
             audio_tracks_.clear();
             audio_tracks_.insert(make_pair(ssrc, track));
+            srs_trace("RtcPlayStream, audio track ssrc:%u", ssrc);
         }
     }
 
@@ -538,6 +540,7 @@ void SrsRtcPlayStream::on_stream_change(SrsRtcSourceDescription* desc)
 
             video_tracks_.clear();
             video_tracks_.insert(make_pair(ssrc, track));
+            srs_trace("RtcPlayStream, video track ssrc:%u", ssrc);
         }
     }
 

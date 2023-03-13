@@ -664,13 +664,13 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
         return err;
     }
 
+    // mb20230308
     if (qn_consumer_) {
         qn_consumer_->enqueue(pkt);
     }
     
     for (int i = 0; i < (int)consumers.size(); i++) {
         SrsRtcConsumer* consumer = consumers.at(i);
-        srs_trace("++++ consumer %s, enqueue \n", req->get_stream_url().c_str());
         if ((err = consumer->enqueue(pkt->copy())) != srs_success) {
             return srs_error_wrap(err, "consume message");
         }
@@ -681,6 +681,38 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
     }
 
     return err;
+}
+
+// mb20230308
+srs_error_t SrsRtcSource::on_rtp_qn(const std::string& id, SrsRtpPacket* pkt)
+{
+    // Update context id if changed.
+    bool id_changed = false;
+    if (_source_id.compare(id)) {
+        srs_trace("source_id changed");
+        id_changed = true;
+
+        if (_pre_source_id.empty()) {
+            _pre_source_id.set_value(id);
+        }
+        _source_id.set_value(id);
+    }
+
+    if (id_changed) {
+        // Notify all consumers.
+        std::vector<SrsRtcConsumer*>::iterator it;
+        for (it = consumers.begin(); it != consumers.end(); ++it) {
+            SrsRtcConsumer* consumer = *it;
+
+            // Notify if context id changed.
+            consumer->update_source_id();
+
+            // Notify about stream description.
+            consumer->on_stream_change(stream_desc_);
+        }
+    }
+    
+    return on_rtp(pkt);
 }
 
 bool SrsRtcSource::has_stream_desc()

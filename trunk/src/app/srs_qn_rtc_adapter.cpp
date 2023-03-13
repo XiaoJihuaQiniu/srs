@@ -102,6 +102,7 @@ QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
     SrsCplxError::srs_assert(s);
     source_ = s;
     stream_url_ = s->get_request()->get_stream_url();
+    source_id_ = "unknow";
     identity_ = srs_update_system_time();
     unique_id_ = 1;
     aud_packets_ = 0;
@@ -128,6 +129,7 @@ void QnRtcConsumer::update_source_id()
 {
     srs_trace("QnRtcConsumer of %s, update source_id=%s/%s", stream_url_.c_str(), 
                 source_->source_id().c_str(), source_->pre_source_id().c_str());
+    source_id_ = source_->source_id().get_value();
 }
 
 srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
@@ -167,7 +169,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     // is mark bit set (video)
     json& js = rtc_data->Head();
     // 添加系列号以判断是否数据有丢失
-    js[ID] = identity_;
+    js[ID] = source_id_;
     js[PACKET_ID] = unique_id_++;
     js[ASTIME] = pkt->get_avsync_time();
     js[MTYPE] = pkt->is_audio() ? "audio" : "video";
@@ -248,6 +250,7 @@ QnRtcProducer::QnRtcProducer(SrsRtcSource* s)
     SrsCplxError::srs_assert(s);
     source_ = s;
     stream_url_ = s->get_request()->get_stream_url();
+    source_id_ = "unknow";
     unique_id_ = 0;
     aud_packets_ = 0;
     vid_packets_ = 0;
@@ -281,11 +284,12 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
         return err;
     }
 
-    uint64_t identity;
-    json_do_default(identity, js[ID], 0);
-    if (identity != identity_) {
-        srs_trace("stream changed, %s\n", stream_url_.c_str());
-        identity_ = identity;
+    std::string source_id;
+    json_do_default(source_id, js[ID], "**unknow");
+    if (source_id != source_id_) {
+        srs_trace("producer %s source id changed, %s -- > %s\n", stream_url_.c_str(), 
+                source_id_.c_str(), source_id.c_str());
+        source_id_ = source_id;
     }
 
     uint64_t unique_id;
@@ -342,7 +346,8 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
                     pkt->get_avsync_time());
     }
     
-    source_->on_rtp(pkt);
+    // source_->on_rtp(pkt);
+    source_->on_rtp_qn(source_id_, pkt);
 
     srs_freep(pkt);
     return srs_success;

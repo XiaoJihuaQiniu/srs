@@ -184,7 +184,7 @@ private:
     bool is_delivering_packets_;
     // Notify stream event to event handler
     std::vector<ISrsRtcSourceEventHandler*> event_handlers_;
-    // to sink rtp packet
+    // mb20230308 to sink rtp packet
     QnRtcConsumer* qn_consumer_;
 private:
     // The PLI for RTC2RTMP.
@@ -238,6 +238,8 @@ public:
     void set_publish_stream(ISrsRtcPublishStream* v);
     // Consume the shared RTP packet, user must free it.
     srs_error_t on_rtp(SrsRtpPacket* pkt);
+    // mb20230308
+    srs_error_t on_rtp_qn(const std::string& id, SrsRtpPacket* pkt);
     // Set and get stream description for souce
     bool has_stream_desc();
     void set_stream_desc(SrsRtcSourceDescription* stream_desc);

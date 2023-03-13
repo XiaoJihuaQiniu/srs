@@ -40,6 +40,16 @@ int _SrsContextId::compare(const _SrsContextId& to) const
     return v_.compare(to.v_);
 }
 
+int _SrsContextId::compare(const std::string& to) const
+{
+    return v_.compare(to);
+}
+
+std::string _SrsContextId::get_value() const
+{
+    return v_;
+}
+
 _SrsContextId& _SrsContextId::set_value(const std::string& v)
 {
     v_ = v;

@@ -88,6 +88,7 @@ private:
 private:
     SrsRtcSource* source_;
     std::string stream_url_;
+    std::string source_id_;
     uint64_t identity_;
     uint64_t unique_id_;
     int64_t aud_packets_;
@@ -121,6 +122,7 @@ private:
 private:
     SrsRtcSource* source_;
     std::string stream_url_;
+    std::string source_id_;
     uint64_t identity_;
     uint64_t unique_id_;
     int64_t aud_packets_;
