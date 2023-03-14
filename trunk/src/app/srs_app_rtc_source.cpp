@@ -451,19 +451,20 @@ srs_error_t SrsRtcSource::on_source_changed()
         qn_consumer_->on_stream_change(stream_desc_);
     }
 
-    // Notify all consumers.
-    std::vector<SrsRtcConsumer*>::iterator it;
-    for (it = consumers.begin(); it != consumers.end(); ++it) {
-        SrsRtcConsumer* consumer = *it;
+    // mb20230308
+    // // Notify all consumers.
+    // std::vector<SrsRtcConsumer*>::iterator it;
+    // for (it = consumers.begin(); it != consumers.end(); ++it) {
+    //     SrsRtcConsumer* consumer = *it;
 
-        // Notify if context id changed.
-        if (id_changed) {
-            consumer->update_source_id();
-        }
+    //     // Notify if context id changed.
+    //     if (id_changed) {
+    //         consumer->update_source_id();
+    //     }
 
-        // Notify about stream description.
-        consumer->on_stream_change(stream_desc_);
-    }
+    //     // Notify about stream description.
+    //     consumer->on_stream_change(stream_desc_);
+    // }
 
     return err;
 }
@@ -555,6 +556,12 @@ srs_error_t SrsRtcSource::on_publish()
     // update the request object.
     srs_assert(req);
 
+    // mb20230308
+    if (qn_is_play_stream2(req)) {
+        srs_error("do not publish on a play stream, error");
+        return srs_error_wrap(err, "publish error");
+    }
+
     // For RTC, DTLS is done, and we are ready to deliver packets.
     // @note For compatible with RTMP, we also set the is_created_, it MUST be created here.
     is_created_ = true;
@@ -599,7 +606,15 @@ void SrsRtcSource::on_unpublish()
         return;
     }
 
+    srs_assert(req);
     srs_trace("++++ stop publish %s\n", req->get_stream_url().c_str());
+
+    // mb20230308
+    if (qn_is_play_stream2(req)) {
+        srs_error("do not unpublish on a play stream, error");
+        return;
+    }
+
     srs_trace("cleanup when unpublish, created=%u, deliver=%u", is_created_, is_delivering_packets_);
 
     is_created_ = false;
@@ -622,6 +637,75 @@ void SrsRtcSource::on_unpublish()
 
         bridge_->on_unpublish();
         srs_freep(bridge_);
+    }
+
+    SrsStatistic* stat = SrsStatistic::instance();
+    stat->on_stream_close(req);
+}
+
+srs_error_t SrsRtcSource::on_publish_qn()
+{
+    srs_trace("start publish %s\n", req->get_stream_url().c_str());
+    srs_error_t err = srs_success;
+
+    // update the request object.
+    srs_assert(req);
+
+    // mb20230308
+    if (!qn_is_play_stream2(req)) {
+        srs_error("call this publish on a play stream, error, error");
+        return srs_error_wrap(err, "publish error");
+    }
+
+    // For RTC, DTLS is done, and we are ready to deliver packets.
+    // @note For compatible with RTMP, we also set the is_created_, it MUST be created here.
+    is_created_ = true;
+    is_delivering_packets_ = true;
+
+    if (bridge_) {
+        bridge_->on_publish();
+    }
+
+    SrsStatistic* stat = SrsStatistic::instance();
+    stat->on_stream_publish(req, _source_id.c_str());
+
+    return err;
+}
+
+void SrsRtcSource::on_unpublish_qn()
+{
+   // ignore when already unpublished.
+    if (!is_created_) {
+        return;
+    }
+
+    srs_assert(req);
+    srs_trace("stop publish %s\n", req->get_stream_url().c_str());
+
+    // mb20230308
+    if (!qn_is_play_stream2(req)) {
+        srs_error("call this unpublish on a play stream");
+        return;
+    }
+
+    srs_trace("cleanup when unpublish, created=%u, deliver=%u", is_created_, is_delivering_packets_);
+
+    is_created_ = false;
+    is_delivering_packets_ = false;
+
+    if (!_source_id.empty()) {
+        _pre_source_id = _source_id;
+    }
+    _source_id = SrsContextId();
+
+    for (size_t i = 0; i < event_handlers_.size(); i++) {
+        ISrsRtcSourceEventHandler* h = event_handlers_.at(i);
+        h->on_unpublish();
+    }
+
+    //free bridge resource
+    if (bridge_) {
+        bridge_->on_unpublish();
     }
 
     SrsStatistic* stat = SrsStatistic::instance();

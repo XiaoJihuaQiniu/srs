@@ -127,6 +127,7 @@ srs_error_t SrsGoApiRtcPlay::do_serve_http(ISrsHttpResponseWriter* w, ISrsHttpMe
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
+    srs_trace("set rtc stream to a playstream");
     ruc.req_->stream = qn_get_play_stream(ruc.req_->stream);
 
     // discovery vhost, resolve the vhost from config
@@ -647,6 +648,7 @@ srs_error_t SrsGoApiRtcWhip::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessa
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
     if (action == "play") {
+        srs_trace("set rtcwhip stream to a playstream");
         ruc.req_->stream = qn_get_play_stream(ruc.req_->stream);
     }
 

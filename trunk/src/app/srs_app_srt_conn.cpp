@@ -281,8 +281,9 @@ srs_error_t SrsMpegtsSrtConn::do_cycle()
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
-    srs_trace("++++ srt mode:%d\n", mode);
+    srs_trace("srt mode:%d\n", mode);
     if (mode == SrtModePull) {
+        srs_trace("set srt stream to a playstream");
         req_->stream = qn_get_play_stream(req_->stream);
     }
 

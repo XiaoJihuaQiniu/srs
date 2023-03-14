@@ -97,6 +97,7 @@ srs_error_t SrsHlsStream::serve_m3u8_ctx(ISrsHttpResponseWriter* w, ISrsHttpMess
 
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀 
+    srs_trace("set m3u8 stream to a playstream");
     req->stream = qn_get_play_stream(req->stream);
 
     // Served by us.

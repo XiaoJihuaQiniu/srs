@@ -585,7 +585,9 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
     
     // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
-    req->stream = qn_get_play_stream(req->stream);
+    // 修改放在这里有问题，至少应该在更上一级调用去修改
+    // srs_trace("set live stream to a playstream");
+    // req->stream = qn_get_play_stream(req->stream);
 
     // update client ip
     req->ip = hc->remote_ip();
@@ -601,15 +603,21 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
         return srs_error_wrap(err, "http hook");
     }
     
+    srs_trace("22222222222222222222222222\n");
     err = do_serve_http(w, r);
+    if (err != srs_success) {
+        srs_trace("2222 %s", SrsCplxError::description(err).c_str());
+    }
     
+    srs_trace("333333333333333333333333\n");
     http_hooks_on_stop(r);
-    
+
     return err;
 }
 
 srs_error_t SrsLiveStream::do_serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage* r)
 {
+    srs_trace("call do_serve_http");
     srs_error_t err = srs_success;
     
     string enc_desc;

@@ -111,6 +111,9 @@ public:
     QnRtcProducer(SrsRtcSource* s);
     ~QnRtcProducer();
 
+    srs_error_t on_publish();
+    void on_unpublish();
+    
     srs_error_t on_data(const QnRtcData_SharePtr& rtc_data);
 
     std::string& source_stream_url();

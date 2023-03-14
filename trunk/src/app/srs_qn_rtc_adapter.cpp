@@ -21,7 +21,8 @@
 } while(0)
 
 
-const std::string PLAY_STREAM_TAG = "^#@!qnplaystream$#@";
+//const std::string PLAY_STREAM_TAG = "^#@qnplaystream$#@";
+const std::string PLAY_STREAM_TAG = "--qnplaystream";
 
 // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
 // 最好是判断下发布的stream名字，不能包含这个后缀
@@ -308,6 +309,18 @@ QnRtcProducer::~QnRtcProducer()
 
 }
 
+srs_error_t QnRtcProducer::on_publish()
+{
+    srs_trace("producer %s on publish", stream_url_.c_str());
+    return source_->on_publish_qn();
+}
+
+void QnRtcProducer::on_unpublish()
+{
+    srs_trace("producer %s on unpublish", stream_url_.c_str());
+    return source_->on_unpublish_qn();
+}
+
 srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
 {
     srs_error_t err = srs_success;
@@ -514,14 +527,19 @@ srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
         } else {
             users.push_back(user);
             srs_trace("user inserted, user:%p, left users:%d\n", user, users.size());
-            req_stream->enable = true;
+            if (!req_stream->enable) {
+                srs_assert(req_stream->producer);
+                if (req_stream->producer) {
+                    req_stream->producer->on_publish();
+                }
+                req_stream->enable = true;
+            }
         }
         
         return err;
     }
 
     QnReqStream* req_stream = new QnReqStream;
-    req_stream->enable = true;
     req_stream->producer = NULL;
     req_stream->users.push_back(user);
     map_req_streams_[stream_url] = req_stream;
@@ -531,8 +549,11 @@ srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
         srs_error("request stream error, %s\n", SrsCplxError::description(err).c_str());
         // map_req_streams_.erase(map_req_streams_.find(stream_url));
         // delete req_stream;
-        return err;
+        // return err;
     }
+
+    req_stream->producer->on_publish();
+    req_stream->enable = true;
 
     srs_trace("user inserted, user:%p, left users:%d\n", user, req_stream->users.size());
     return srs_success;
@@ -557,6 +578,9 @@ srs_error_t QnRtcManager::StopRequestStream(SrsRequest* req, void* user)
             srs_trace("user removed, user:%p, left users:%d\n", user, users.size());
             if (users.empty()) {
                 req_stream->enable = false;
+                if (req_stream->producer){
+                    req_stream->producer->on_unpublish();
+                }
             }
         }
     }

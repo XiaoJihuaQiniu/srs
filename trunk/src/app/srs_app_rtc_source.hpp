@@ -228,6 +228,10 @@ public:
     virtual srs_error_t on_publish();
     // When stop publish stream.
     virtual void on_unpublish();
+
+    // mb20230308
+    virtual srs_error_t on_publish_qn();
+    virtual void on_unpublish_qn();
 public:
     // For event handler
     void subscribe(ISrsRtcSourceEventHandler* h);
