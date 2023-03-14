@@ -137,7 +137,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
 {
     srs_error_t err = srs_success;
 
-    if (pkt->is_keyframe() /* && pkt->header.get_marker() */) {
+    if (pkt->is_keyframe() && pkt->header.get_marker()) {
         srs_trace("--> QnRtcConsumer of %s, recv key frame, ts:%lld", stream_url_.c_str(), pkt->get_avsync_time());
     }
 
@@ -380,7 +380,7 @@ srs_error_t QnRtcProducer::on_data(const QnRtcData_SharePtr& rtc_data)
         vid_bytes_ += pkt->payload_bytes();
     }
 
-    if (pkt->is_keyframe() /* && pkt->header.get_marker() */) {
+    if (pkt->is_keyframe() && pkt->header.get_marker()) {
         srs_trace("<-- QnRtcProducer of %s, recv key frame, ts:%lld", qn_get_origin_stream(stream_url_).c_str(), 
                     pkt->get_avsync_time());
     }
@@ -613,36 +613,36 @@ srs_error_t QnRtcManager::cycle()
         std::string head = js.dump();
         // srs_trace("send js:%s\n", head.c_str());
         uint16_t js_size = static_cast<uint16_t>(head.size());
-        uint16_t js_offset = 4 + 2 + 2;
+        // 前面8字节固定，不能改动，否者影响后面的reserved
+        uint16_t js_offset = 4 + 2 + 2 + transport_->GetResverdSize();
 
-        /****************************************************************************************
-         | total size(4bytes) | json size(2bytes) | json offset(2bytes) | *** | json | raw data | 
-        *****************************************************************************************/
-        uint32_t total_size = js_size + 4 + 2 + 2 + rtc_data->Payload()->Size();
+        /*********************************************************************************************
+         | total size(4bytes) | json size(2bytes) | json offset(2bytes) | reserved | json | raw data | 
+        **********************************************************************************************/
+        uint32_t total_size = 4 + 2 + 2 + transport_->GetResverdSize() + js_size + rtc_data->Payload()->Size();
         QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
 
         // big endian
-        unsigned char* data = (unsigned char*)packet->Data();
+        uint8_t* data = (uint8_t*)packet->Data();
 
         // write total_size
-        *data++ = ((total_size >> 24) & 0xff);
-        *data++ = ((total_size >> 16) & 0xff);
-        *data++ = ((total_size >> 8) & 0xff);
-        *data++ = (total_size & 0xff);
+        data[0] = ((total_size >> 24) & 0xff);
+        data[1] = ((total_size >> 16) & 0xff);
+        data[2] = ((total_size >> 8) & 0xff);
+        data[3] = (total_size & 0xff);
 
         // json size
-        *data++ = ((js_size >> 8) & 0xff);
-        *data++ = (js_size & 0xff);
+        data[4] = ((js_size >> 8) & 0xff);
+        data[5] = (js_size & 0xff);
         // json offset
-        *data++ = ((js_offset >> 8) & 0xff);
-        *data++ = (js_offset & 0xff);
+        data[6] = ((js_offset >> 8) & 0xff);
+        data[7] = (js_offset & 0xff);
         
         // json data
-        memcpy(data, head.c_str(), js_size);
-        data += js_size;
+        memcpy(data + js_offset, head.c_str(), js_size);
 
         // raw payload data
-        memcpy(data, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
+        memcpy(data + js_offset + js_size, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
 
         if (transport_) {
             transport_->Send(packet);
@@ -658,7 +658,7 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     srs_error_t err = srs_success;
 
     // big endian
-    unsigned char* data = (unsigned char*)packet->Data();
+    uint8_t* data = (uint8_t*)packet->Data();
 
     uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
     uint16_t js_size = (data[4] << 8) | data[5];
@@ -781,6 +781,48 @@ QnTransport::~QnTransport()
 {
 }
 
+uint32_t QnTransport::MakeCheckSum32(uint8_t* pdata, uint32_t dataLen)
+{
+    uint32_t len;
+    uint32_t chk = 0;
+
+    // 按照小端的方式计算4个字节的checksum
+    len = dataLen;
+    while (len >= 4)
+    {
+        chk +=   (uint32_t)pdata[0];                //     ----          ----         ----       pdata[0]
+        chk +=   ((uint32_t)pdata[1] << 8);         //     ----          ----        pdata[1]     ----
+        chk +=   ((uint32_t)pdata[2] << 16);        //     ----         pdata[2]      ----        ----
+        chk +=   ((uint32_t)pdata[3] << 24);        //     pdata[3]      ----         ----        ----
+
+        pdata += 4;
+        len -= 4;
+    }
+
+    if (len > 0)
+    {
+        if (len == 1)
+        {
+            chk +=   (uint32_t)pdata[0];
+        }
+        else if (len == 2)
+        {
+            chk +=   (uint32_t)pdata[0];
+            chk +=   ((uint32_t)pdata[1] << 8);
+        }
+        else
+        {
+            chk +=   (uint32_t)pdata[0];
+            chk +=   ((uint32_t)pdata[1] << 8);
+            chk +=   ((uint32_t)pdata[2] << 16);
+        }
+    }
+
+    chk = ~chk;
+    chk++;
+
+    return chk;
+}
 
 QnLoopTransport::QnLoopTransport(const std::string& name, const TransRecvCbType& callback) :
                     QnTransport(name, callback)
@@ -792,6 +834,11 @@ QnLoopTransport::QnLoopTransport(const std::string& name, const TransRecvCbType&
 
 QnLoopTransport::~QnLoopTransport()
 {
+}
+
+uint32_t QnLoopTransport::GetResverdSize()
+{
+    return 0;
 }
 
 srs_error_t QnLoopTransport::Send(const QnDataPacket_SharePtr& packet)
@@ -858,7 +905,7 @@ QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const Tran
     trans_thread_ = new std::thread(f);
     trans_thread_->detach();
 
-    rwfd_ = srs_netfd_open(fds_[0]);
+    rwfd_ = srs_netfd_open_socket(fds_[0]);
     packet_cond_ = srs_cond_new();
     trd_ = new SrsSTCoroutine("sockpair-transport", this);
     trd_->start();
@@ -869,9 +916,26 @@ QnSocketPairTransport::~QnSocketPairTransport()
 
 }
 
+uint32_t QnSocketPairTransport::GetResverdSize()
+{
+    return 8;
+}
+
 srs_error_t QnSocketPairTransport::Send(const QnDataPacket_SharePtr& packet)
 {
     srs_error_t err = srs_success;
+
+    // 前面8字节分别是 total_size | js_size | js_offset
+    char* data_sum = packet->Data() + 8 + 4;
+    uint32_t size_sum = packet->Size() - 8 - 4;
+    uint32_t sum32 = MakeCheckSum32((uint8_t*)data_sum, size_sum);
+
+    uint8_t* data = (uint8_t*)packet->Data() + 8;
+    data[0] = ((sum32 >> 24) & 0xff);
+    data[1] = ((sum32 >> 16) & 0xff);
+    data[2] = ((sum32 >> 8) & 0xff);
+    data[3] = (sum32 & 0xff);
+
     ssize_t write_size = srs_write(rwfd_, packet->Data(), packet->Size(), 2000000);
     if (write_size < 0) {
         srs_trace("st write error %s(%d)", strerror(errno), errno);
@@ -907,13 +971,25 @@ srs_error_t QnSocketPairTransport::cycle()
             }
         }        
 
-        ssize_t read_size = srs_read(rwfd_, buffer, max_buf_size_, 2000000);
-        if (read_size <= 0) {
+        ssize_t read_size = srs_read(rwfd_, buffer, max_buf_size_, 5000000);
+        if (read_size < 0) {
             srs_trace("st read error %s(%d)", strerror(errno), errno);
             continue;
         }
 
         if (read_size == 0) {
+            continue;
+        }
+
+        char* data_sum = buffer + 8 + 4;
+        uint32_t size_sum = read_size - 8 - 4;
+        uint32_t sum32 = MakeCheckSum32((uint8_t*)data_sum, size_sum);
+
+        uint8_t* data = (uint8_t*)buffer + 8;
+        uint32_t sum32_ori = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+
+        if (sum32 != sum32_ori) {
+            srs_error("check sum32 fail, %u != %u", sum32, sum32_ori);
             continue;
         }
 

@@ -198,7 +198,10 @@ public:
     QnTransport(const std::string& name, const TransRecvCbType& callback);
     virtual ~QnTransport();
 
+    virtual uint32_t GetResverdSize() = 0;
     virtual srs_error_t Send(const QnDataPacket_SharePtr& packet) = 0;
+
+    uint32_t MakeCheckSum32(uint8_t* pdata, uint32_t dataLen);
 
 protected:
     std::string name_;
@@ -211,6 +214,7 @@ public:
     QnLoopTransport(const std::string& name, const TransRecvCbType& callback);
     ~QnLoopTransport();
 
+    virtual uint32_t GetResverdSize();
     virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
 
 private:
@@ -228,6 +232,7 @@ public:
     QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback);
     ~QnSocketPairTransport();
 
+    virtual uint32_t GetResverdSize();
     virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
 
 private:
