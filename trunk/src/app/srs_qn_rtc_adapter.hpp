@@ -205,7 +205,7 @@ public:
     virtual ~QnTransport();
 
     virtual uint32_t GetResverdSize() = 0;
-    virtual srs_error_t Send(const QnDataPacket_SharePtr& packet) = 0;
+    virtual srs_error_t Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet) = 0;
 
     uint32_t MakeCheckSum32(uint8_t* pdata, uint32_t dataLen);
 
@@ -221,7 +221,7 @@ public:
     ~QnLoopTransport();
 
     virtual uint32_t GetResverdSize();
-    virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
+    virtual srs_error_t Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet);
 
 private:
     virtual srs_error_t cycle();
@@ -239,7 +239,7 @@ public:
     ~QnSocketPairTransport();
 
     virtual uint32_t GetResverdSize();
-    virtual srs_error_t Send(const QnDataPacket_SharePtr& packet);
+    virtual srs_error_t Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet);
 
 private:
     virtual srs_error_t cycle();

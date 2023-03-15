@@ -641,7 +641,6 @@ srs_error_t QnRtcManager::cycle()
 
         json& js = rtc_data->Head();
         // 添加系列号以判断是否数据有丢失
-        js["unique_id"] = send_unique_id_++;
         js["stream_url"] = rtc_data->StreamUrl();
 
         std::string head = js.dump();
@@ -676,7 +675,7 @@ srs_error_t QnRtcManager::cycle()
         memcpy(data + 8 + js_size, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
 
         if (transport_) {
-            transport_->Send(packet);
+            transport_->Send(rtc_data->StreamUrl(), rtc_data->Type(), packet);
         }
     }
 
@@ -701,17 +700,10 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     // srs_trace("recv js:%s\n", head.c_str());
     js = json::parse(head);
 
-    if (!json_have(js, "unique_id") || !json_have(js, "stream_url")) {
+    if (!json_have(js, "stream_url")) {
         srs_error("producer data no unique_id or stream_url, error");
         return err;
     }
-
-    uint64_t unique_id;
-    json_do_default(unique_id, js["unique_id"], 0);
-    if (unique_id != recv_unique_id_ + 1) {
-        srs_warn("unique id jumped, %lld --> %lld\n", recv_unique_id_, unique_id);
-    }
-    recv_unique_id_ = unique_id;
 
     std::string stream_url;
     json_do_default(stream_url, js["stream_url"], "^&unknow");
@@ -872,7 +864,7 @@ uint32_t QnLoopTransport::GetResverdSize()
     return 0;
 }
 
-srs_error_t QnLoopTransport::Send(const QnDataPacket_SharePtr& packet)
+srs_error_t QnLoopTransport::Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet)
 {
     // srs_trace("LoopTransport send %u bytes\n", packet->Size());
     vec_packets_.push_back(packet);
@@ -952,7 +944,7 @@ uint32_t QnSocketPairTransport::GetResverdSize()
     return 0;
 }
 
-srs_error_t QnSocketPairTransport::Send(const QnDataPacket_SharePtr& packet)
+srs_error_t QnSocketPairTransport::Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet)
 {
     srs_error_t err = srs_success;
 
