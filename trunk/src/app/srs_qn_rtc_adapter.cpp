@@ -905,12 +905,7 @@ srs_error_t QnLoopTransport::cycle()
 }
 
 
-struct TransMsg
-{
-    std::string stream_url;
-    int32_t type;
-    QnDataPacket_SharePtr packet;
-};
+///////////////////////////////////////////////////////////////////////////////////
 
 QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback) :
                                                 QnTransport(name, callback)
@@ -921,15 +916,7 @@ QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const Tran
     }
 
     auto f = [&]() {
-        srs_trace("trans thread start");
-        char* buffer = new char[max_buf_size_];
-        while (true) {
-            auto read_size = read(fds_[1], buffer, max_buf_size_);
-            if (read_size > 0) {
-                write(fds_[1], buffer, read_size);
-            }
-        }
-        srs_trace("trans thread quit...");
+        thread_process();
     };
 
     trans_thread_ = new std::thread(f);
@@ -983,28 +970,12 @@ srs_error_t QnSocketPairTransport::cycle()
     srs_error_t err = srs_success;
     srs_trace("QnSocketPairTransport thread running \n");
 
-    char* buffer = NULL;
-
     while (true) {
         if ((err = trd_->pull()) != srs_success) {
             return srs_error_wrap(err, "buffer cache");
         }
 
-        // if (!buffer) {
-        //     buffer = new char[max_buf_size_];
-        //     if (!buffer) {
-        //         srs_error("new buffer error");
-        //         srs_usleep(10000);
-        //         continue;
-        //     }
-        // }
-        // ssize_t read_size = srs_read(rwfd_, buffer, max_buf_size_, 5000000);
-        // if (read_size < 0) {
-        //     srs_trace("st read error %s(%d)", strerror(errno), errno);
-        //     continue;
-        // }
-
-        TransMsg* msg = NULL;
+        TransMsg* msg;
         ssize_t read_size = srs_read(rwfd_, &msg, sizeof(msg), 5000000);
         if (read_size < 0) {
             srs_trace("st read error %s(%d)", strerror(errno), errno);
@@ -1016,18 +987,86 @@ srs_error_t QnSocketPairTransport::cycle()
         }
 
         if (recv_callback_) {
-            // QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(buffer, read_size);
-            // buffer = NULL;
             QnDataPacket_SharePtr packet = msg->packet;
             delete msg;
             recv_callback_(name_, packet);
         }
     }
 
-    if (buffer) {
-        delete[] buffer;
-    }
-
     srs_trace("QnSocketPairTransport thread quit... \n");
     return err;
+}
+
+void QnSocketPairTransport::thread_process()
+{
+    srs_trace("trans thread start");
+
+    while (true) {
+        TransMsg* msg;
+        auto read_size = read(fds_[1], &msg, sizeof(msg));
+        if (read_size <= 0) {
+            continue;
+        }
+
+        if (read_size != sizeof(msg)) {
+            srs_error("msg size error, %u != %u", read_size, sizeof(msg));
+            continue;
+        }
+
+        write(fds_[1], &msg, read_size);
+    }
+    
+    srs_trace("trans thread quit...");
+}
+
+
+HttpStreamSender::HttpStreamSender(const std::string& stream_url) : StreamSender(stream_url)
+{
+
+}
+
+HttpStreamSender::~HttpStreamSender()
+{
+
+}
+
+srs_error_t HttpStreamSender::Start()
+{
+    srs_error_t err = srs_success;
+    return err;
+}
+
+void HttpStreamSender::Stop()
+{
+
+}
+
+srs_error_t HttpStreamSender::Send(TransMsg* msg)
+{
+    srs_error_t err = srs_success;
+    return err;
+}
+
+
+
+HttpStreamReceiver::HttpStreamReceiver(const std::string& stream_url, const StreamRecvCbType& callback) : 
+                        StreamReceiver(stream_url, callback)
+{
+
+}
+
+HttpStreamReceiver::~HttpStreamReceiver()
+{
+
+}
+
+srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
+{
+    srs_error_t err = srs_success;
+    return err;
+}
+
+void HttpStreamReceiver::Stop()
+{
+
 }

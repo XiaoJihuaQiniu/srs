@@ -160,9 +160,9 @@ public:
     QnRtcProducer* producer;
 };
 
-/****************************************************************************************
- | total size(4bytes) | json size(2bytes) | json offset(2bytes) | *** | json | raw data | 
-*****************************************************************************************/
+/*************************************************************
+ | total size(4bytes) | json size(4bytes) | json | raw data | 
+**************************************************************/
 class QnTransport;
 class QnRtcManager : public ISrsCoroutineHandler, public ISrsFastTimer
 {
@@ -232,6 +232,12 @@ private:
     std::vector<QnDataPacket_SharePtr> vec_packets_;
 };
 
+
+///////////////////////////////////////////////////////////////////////////////////
+
+class StreamSender;
+class StreamReceiver;
+
 class QnSocketPairTransport : public QnTransport, public ISrsCoroutineHandler
 {
 public:
@@ -243,6 +249,7 @@ public:
 
 private:
     virtual srs_error_t cycle();
+    void thread_process();
 
 private:
     int fds_[2];
@@ -251,6 +258,73 @@ private:
     srs_cond_t packet_cond_;
     size_t max_buf_size_;
     std::thread* trans_thread_;
+    
+    std::string gate_server_;
+    std::map<std::string, StreamSender*> map_stream_senders_;
+    std::map<std::string, StreamReceiver*> map_stream_receivers_;
+};
+
+
+struct TransMsg
+{
+    std::string stream_url;
+    int32_t type;
+    QnDataPacket_SharePtr packet;
+};
+
+class StreamSender
+{
+public:
+    StreamSender(const std::string& stream_url) { stream_url_ = stream_url; };
+    virtual ~StreamSender() {};
+
+    virtual srs_error_t Start() = 0;
+    virtual void Stop() = 0;
+
+    virtual srs_error_t Send(TransMsg* msg) = 0;
+
+protected:
+    std::string stream_url_;
+};
+
+class HttpStreamSender : public StreamSender
+{
+public:
+    HttpStreamSender(const std::string& stream_url);
+    ~HttpStreamSender();
+
+    srs_error_t Start();
+    void Stop();
+    srs_error_t Send(TransMsg* msg);
+};
+
+typedef std::function<void (const std::string& flag, TransMsg* msg)> StreamRecvCbType;
+class StreamReceiver
+{
+public:
+    StreamReceiver(const std::string& stream_url, const StreamRecvCbType& callback) {
+        stream_url_ = stream_url; 
+        recv_callback_ = callback;
+    };
+
+    virtual ~StreamReceiver() {};
+
+    virtual srs_error_t Start() = 0;
+    virtual void Stop() = 0;
+
+protected:
+    std::string stream_url_;
+    StreamRecvCbType recv_callback_;
+};
+
+class HttpStreamReceiver : public StreamReceiver
+{
+public:
+    HttpStreamReceiver(const std::string& stream_url, const StreamRecvCbType& callback);
+    ~HttpStreamReceiver();
+
+    srs_error_t Start();
+    void Stop();
 };
 
 #endif /* QN_APP_RTC_HPP */
