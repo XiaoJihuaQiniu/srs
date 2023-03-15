@@ -75,6 +75,9 @@ public:
 
     // When source id changed, notice client to print.
     void update_source_id();
+
+    srs_error_t on_publish() { return srs_success; };   //TODO
+    srs_error_t on_unpublish() { return srs_success; }; //TODO
     
     // Put RTP packet into queue.
     // @note We do not drop packet here, but drop it in sender.
@@ -238,6 +241,13 @@ private:
 class StreamSender;
 class StreamReceiver;
 
+struct TransMsg
+{
+    std::string stream_url;
+    int32_t type;
+    QnDataPacket_SharePtr packet;
+};
+
 class QnSocketPairTransport : public QnTransport, public ISrsCoroutineHandler
 {
 public:
@@ -250,6 +260,8 @@ public:
 private:
     virtual srs_error_t cycle();
     void thread_process();
+    void deal_publish_msg(TransMsg* msg);
+    void deal_request_msg(TransMsg* msg);
 
 private:
     int fds_[2];
@@ -264,18 +276,14 @@ private:
     std::map<std::string, StreamReceiver*> map_stream_receivers_;
 };
 
-
-struct TransMsg
-{
-    std::string stream_url;
-    int32_t type;
-    QnDataPacket_SharePtr packet;
-};
-
 class StreamSender
 {
 public:
-    StreamSender(const std::string& stream_url) { stream_url_ = stream_url; };
+    StreamSender(const std::string gate_server, const std::string& stream_url) { 
+        gate_server_ = gate_server;
+        stream_url_ = stream_url; 
+    };
+
     virtual ~StreamSender() {};
 
     virtual srs_error_t Start() = 0;
@@ -284,13 +292,14 @@ public:
     virtual srs_error_t Send(TransMsg* msg) = 0;
 
 protected:
+    std::string gate_server_;
     std::string stream_url_;
 };
 
 class HttpStreamSender : public StreamSender
 {
 public:
-    HttpStreamSender(const std::string& stream_url);
+    HttpStreamSender(const std::string gate_server, const std::string& stream_url);
     ~HttpStreamSender();
 
     srs_error_t Start();
@@ -302,7 +311,8 @@ typedef std::function<void (const std::string& flag, TransMsg* msg)> StreamRecvC
 class StreamReceiver
 {
 public:
-    StreamReceiver(const std::string& stream_url, const StreamRecvCbType& callback) {
+    StreamReceiver(const std::string gate_server, const std::string& stream_url, const StreamRecvCbType& callback) {
+        gate_server_ = gate_server;
         stream_url_ = stream_url; 
         recv_callback_ = callback;
     };
@@ -313,6 +323,7 @@ public:
     virtual void Stop() = 0;
 
 protected:
+    std::string gate_server_;
     std::string stream_url_;
     StreamRecvCbType recv_callback_;
 };
@@ -320,7 +331,7 @@ protected:
 class HttpStreamReceiver : public StreamReceiver
 {
 public:
-    HttpStreamReceiver(const std::string& stream_url, const StreamRecvCbType& callback);
+    HttpStreamReceiver(const std::string gate_server, const std::string& stream_url, const StreamRecvCbType& callback);
     ~HttpStreamReceiver();
 
     srs_error_t Start();

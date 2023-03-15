@@ -57,9 +57,11 @@ bool qn_is_play_stream2(const SrsRequest* req)
 enum EmRtcDataType
 {
     en_RtcDataType_Media = 0,           // 音视频数据
-    en_RtcDataType_NewStream,           // 新的数据流
-    en_RtcDataType_DeleteStream,        // 停止数据流
-    
+    en_RtcDataType_PublishStream,       // 发布新的数据流
+    en_RtcDataType_UnPublishStream,     // 停止发布数据流
+    en_RtcDataType_RequestStream,       // 请求数据流
+    en_RtcDataType_StopStream,          // 停止请求数据流
+
     en_RtcDataType_butt
 };
 
@@ -941,7 +943,10 @@ uint32_t QnSocketPairTransport::GetResverdSize()
 srs_error_t QnSocketPairTransport::Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet)
 {
     srs_error_t err = srs_success;
+
     TransMsg* msg = new TransMsg;
+    srs_assert(msg);
+
     msg->stream_url = stream_url;
     msg->type = type;
     msg->packet = packet;
@@ -951,16 +956,6 @@ srs_error_t QnSocketPairTransport::Send(const std::string& stream_url, int32_t t
         srs_trace("st write error %s(%d)", strerror(errno), errno);
         return srs_error_wrap(err, "st_write error");
     }
-
-    // ssize_t write_size = srs_write(rwfd_, packet->Data(), packet->Size(), 2000000);
-    // if (write_size < 0) {
-    //     srs_trace("st write error %s(%d)", strerror(errno), errno);
-    //     return srs_error_wrap(err, "st_write error");
-    // }
-    // if (write_size < packet->Size()) {
-    //     srs_trace("st write timeout %s(%d)", strerror(errno), errno);
-    //     return srs_error_wrap(err, "st_write timeout");
-    // }
 
     return err;
 }
@@ -982,9 +977,12 @@ srs_error_t QnSocketPairTransport::cycle()
             continue;
         }
 
-        if (read_size == 0) {
+        if (read_size != sizeof(msg)) {
+            srs_error("srs_read size error, %u != %u", read_size, sizeof(msg));
             continue;
         }
+
+        srs_assert(msg);
 
         if (recv_callback_) {
             QnDataPacket_SharePtr packet = msg->packet;
@@ -1009,18 +1007,114 @@ void QnSocketPairTransport::thread_process()
         }
 
         if (read_size != sizeof(msg)) {
-            srs_error("msg size error, %u != %u", read_size, sizeof(msg));
+            srs_error("read size error, %u != %u", read_size, sizeof(msg));
             continue;
         }
 
-        write(fds_[1], &msg, read_size);
+        // 没有服务器，则自环
+        if (gate_server_.empty()) {
+            if (msg->type == en_RtcDataType_Media) {
+                write(fds_[1], &msg, read_size);
+            } else {
+                delete msg;
+            }
+            continue;
+        }
+
+        if (msg->type == en_RtcDataType_Media || 
+            msg->type == en_RtcDataType_PublishStream || 
+            msg->type == en_RtcDataType_UnPublishStream) {
+            deal_publish_msg(msg);
+        } else {
+            deal_request_msg(msg);
+        }
     }
-    
+
     srs_trace("trans thread quit...");
 }
 
+void QnSocketPairTransport::deal_publish_msg(TransMsg* msg)
+{
+    const std::string& stream_url = msg->stream_url;
 
-HttpStreamSender::HttpStreamSender(const std::string& stream_url) : StreamSender(stream_url)
+    bool new_sender = false;
+    auto it = map_stream_senders_.find(stream_url);
+    if (it == map_stream_senders_.end()) {
+        if (msg->type == en_RtcDataType_UnPublishStream) {
+            return;
+        }
+
+        StreamSender* stream_sender = new HttpStreamSender(gate_server_, stream_url);
+        srs_assert(stream_sender);
+        new_sender = true;
+        map_stream_senders_[stream_url] = stream_sender;
+        it = map_stream_senders_.find(stream_url);
+    }
+
+    StreamSender* stream_sender = it->second;
+    srs_assert(stream_sender);
+
+    if ((msg->type == en_RtcDataType_PublishStream) || new_sender) {
+        stream_sender->Start();
+        delete msg;
+        return;
+    }
+
+    if (msg->type == en_RtcDataType_Media) {
+        stream_sender->Send(msg);
+        return;
+    }
+
+    if (msg->type == en_RtcDataType_UnPublishStream) {
+        stream_sender->Stop();
+        delete msg;
+        return;
+    }
+}
+
+void QnSocketPairTransport::deal_request_msg(TransMsg* msg)
+{
+    const std::string& stream_url = msg->stream_url;
+
+    auto it = map_stream_receivers_.find(stream_url);
+    if (it == map_stream_receivers_.end()) {
+        if (msg->type == en_RtcDataType_StopStream) {
+            return;
+        }
+
+        auto f = [&](const std::string& flag, TransMsg* msg) {
+            // TODO
+            if (map_stream_receivers_.find(flag) == map_stream_receivers_.end()) {
+                srs_error("stream %s not exist\n", flag.c_str());
+            }
+            delete msg;
+        };
+
+        StreamReceiver* stream_receiver = new HttpStreamReceiver(gate_server_, stream_url, f);
+        srs_assert(stream_receiver);
+        map_stream_receivers_[stream_url] = stream_receiver;
+        it = map_stream_receivers_.find(stream_url);
+    }
+
+    StreamReceiver* stream_receiver = it->second;
+    srs_assert(stream_receiver);
+
+    if (msg->type == en_RtcDataType_RequestStream) {
+        stream_receiver->Start();
+        delete msg;
+        return;
+    }
+
+    if (msg->type == en_RtcDataType_StopStream) {
+        stream_receiver->Stop();
+        delete msg;
+        return;
+    }
+}
+
+
+HttpStreamSender::HttpStreamSender(const std::string gate_server, const std::string& stream_url) : 
+                                    StreamSender(gate_server, stream_url)
 {
 
 }
@@ -1049,8 +1143,8 @@ srs_error_t HttpStreamSender::Send(TransMsg* msg)
 
 
 
-HttpStreamReceiver::HttpStreamReceiver(const std::string& stream_url, const StreamRecvCbType& callback) : 
-                        StreamReceiver(stream_url, callback)
+HttpStreamReceiver::HttpStreamReceiver(const std::string gate_server, const std::string& stream_url, const StreamRecvCbType& callback) : 
+                        StreamReceiver(gate_server, stream_url, callback)
 {
 
 }
