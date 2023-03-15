@@ -51,11 +51,14 @@ class QnRtcData
 public:
     void SetStreamUrl(const std::string& s) { stream_url_ = s; };
     std::string& StreamUrl() { return stream_url_; };
+    void SetType(int32_t type) { type_ = type; };
+    int32_t Type() { return type_; };
     json& Head() { return head_; };
     void SetPayload(const QnDataPacket_SharePtr& packet) { packet_ = packet; };
     QnDataPacket_SharePtr Payload() { return packet_; };
 private:
     std::string stream_url_;
+    int32_t type_;
     json head_;
     QnDataPacket_SharePtr packet_;
 };
