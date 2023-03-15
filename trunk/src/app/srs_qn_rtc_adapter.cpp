@@ -66,6 +66,244 @@ enum EmRtcDataType
     en_RtcDataType_butt
 };
 
+const std::string ID = "id";
+const std::string PACKET_ID = "packet_id";
+const std::string ASTIME = "astime";
+const std::string MTYPE = "mtype";
+const std::string PAYLOAD_TYPE = "pt";
+const std::string MARK_BIT = "mark";
+const std::string KEY_FRAME = "key";
+
+const uint32_t DATA_HEAD_SIZE = 8;
+
+uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
+{
+    // 发送格式只能是4字节的长度 + rtp包，把json格式的数据写入rtp扩展
+    // big endian
+    uint8_t* data = (uint8_t*)packet->Data();
+
+    uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+    uint16_t js_size = (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | data[7];
+
+    json js;
+    std::string head((char*)data + DATA_HEAD_SIZE, js_size);
+    js = json::parse(head);
+
+    std::string source_id;
+    json_do_default(source_id, js[ID], "**unknow");
+
+    uint64_t unique_id;
+    json_do_default(unique_id, js[PACKET_ID], 0);
+
+    std::string type;
+    json_do_default(type, js[MTYPE], "unknow");
+
+    int64_t astime;
+    json_do_default(astime, js[ASTIME], 0);
+
+    uint32_t rtp_size = total_size - DATA_HEAD_SIZE - js_size;
+    uint8_t* rtp_data = data + DATA_HEAD_SIZE + js_size;
+
+    // 找到扩展头的位置
+    int16_t ext_size = 0;
+    bool have_ext = rtp_data[0] & 0x10;
+    int16_t rel_ext_size = 0;
+    uint8_t cc = rtp_data[0] & 0x0f;
+    uint32_t size_to_cc = 12 + 4 * cc;
+    uint8_t* ext_data = rtp_data + size_to_cc;
+
+    if (have_ext) {
+        srs_assert(ext_data[0] == 0xBE);
+        srs_assert(ext_data[1] == 0xDE);
+        ext_size = (ext_data[2] << 8) | ext_data[3];
+        ext_size *= 4;
+        uint8_t* p = ext_data + 4;
+        while ((rel_ext_size < ext_size) && (*p != 0)) {
+            uint8_t t = p[0] & 0xf0;
+            uint8_t s = p[0] & 0x0f;
+            rel_ext_size += (s + 1 + 1);
+            p += (s + 1 + 1);
+            srs_trace("ext_type:%hhu, size:%hhu", t, s + 1);
+        }
+
+        srs_assert(rel_ext_size <= ext_size);
+    }
+
+    uint32_t new_ext_size = rel_ext_size;
+    new_ext_size += source_id.size();
+    new_ext_size += 1;
+    new_ext_size += sizeof(unique_id);
+    new_ext_size += 1;
+    new_ext_size += type.size();
+    new_ext_size += 1;
+    new_ext_size += sizeof(astime);
+    new_ext_size += 1;
+
+    uint32_t new_pad_count = (new_ext_size % 4 == 0) ? 0 : (4 - new_ext_size % 4);
+    new_ext_size += new_pad_count;
+
+    uint32_t payload_size = rtp_size - size_to_cc;
+    uint8_t* payload_addr = rtp_data + size_to_cc;
+    if (have_ext) {
+        payload_size -= (4 + ext_size);
+        payload_addr += (4 + ext_size);
+    }
+
+    uint32_t new_total_size = DATA_HEAD_SIZE + size_to_cc + 4 + new_ext_size + payload_size;
+
+    uint8_t* data_new = new uint8_t[new_total_size];
+    srs_assert(data_new);
+
+    uint8_t* data_write = data_new + DATA_HEAD_SIZE;
+    memcpy(data_write, rtp_data, size_to_cc);
+    data_write[0] |= 0x10;      // 有扩展头标识
+    data_write += size_to_cc;
+
+    data_write[0] = 0xBE;
+    data_write[1] = 0xDE;
+    data_write[2] = ((new_ext_size / 4) >> 8) & 0xff;
+    data_write[3] = ((new_ext_size / 4) & 0xff);
+    data_write += 4;
+
+    if (rel_ext_size > 0) {
+        memcpy(data_write, ext_data + 4, rel_ext_size);
+        data_write += rel_ext_size;
+    }
+
+    // 新加扩展
+    data_write[0] = 0xc0 | (source_id.size() - 1);     // 扩展类型12
+    data_write++;
+    memcpy(data_write, source_id.c_str(), source_id.size());
+    data_write += source_id.size();
+
+    data_write[0] = 0xd0 | (sizeof(unique_id) - 1);     // 扩展类型13
+    data_write++;
+    *(uint64_t*)data_write = unique_id;
+    data_write += sizeof(unique_id);
+
+    data_write[0] = 0xe0 | (sizeof(astime) - 1);        // 扩展类型14
+    data_write++;
+    *(int64_t*)data_write = astime;
+    data_write += sizeof(astime);
+
+    data_write[0] = 0xf0 | (type.size() - 1);           // 扩展类型15
+    data_write++;
+    memcpy(data_write, type.c_str(), type.size());
+    data_write += type.size();
+
+    if (new_pad_count > 0) {
+        memset(data_write, 0, new_pad_count);
+    }
+
+    data_write = data_new + DATA_HEAD_SIZE + size_to_cc + 4 + new_ext_size;
+    memcpy(data_write, payload_addr, payload_size);
+
+    // write total_size
+    data_new[0] = ((new_total_size >> 24) & 0xff);
+    data_new[1] = ((new_total_size >> 16) & 0xff);
+    data_new[2] = ((new_total_size >> 8) & 0xff);
+    data_new[3] = (new_total_size & 0xff);
+
+    size = new_total_size;
+    return data_new;
+}
+
+QnDataPacket_SharePtr MsgFromRtpExt(const std::string& stream_url, uint8_t* rdt, size_t size)
+{
+    uint32_t total_size_old = (rdt[0] << 24) | (rdt[1] << 16) | (rdt[2] << 8) | rdt[3];
+    srs_assert(total_size_old == size);
+
+    uint32_t rtp_size = total_size_old - DATA_HEAD_SIZE;
+    uint8_t* rtp_data = rdt + DATA_HEAD_SIZE;
+
+    json js;
+    js["stream_url"] = stream_url;
+
+    std::string source_id;
+    uint64_t unique_id;
+    std::string type;
+    int64_t astime;
+
+    // 找到扩展头的位置
+    int16_t ext_size = 0;
+    bool have_ext = rtp_data[0] & 0x10;
+    srs_assert(have_ext);
+    int16_t rel_ext_size = 0;
+    uint8_t cc = rtp_data[0] & 0x0f;
+    uint32_t size_to_cc = 12 + 4 * cc;
+    uint8_t* ext_data = rtp_data + size_to_cc;
+
+    if (have_ext) {
+        srs_assert(ext_data[0] == 0xBE);
+        srs_assert(ext_data[1] == 0xDE);
+        ext_size = (ext_data[2] << 8) | ext_data[3];
+        ext_size *= 4;
+        uint8_t* p = ext_data + 4;
+        while ((rel_ext_size < ext_size) && (*p != 0)) {
+            uint8_t t = p[0] & 0xf0;
+            uint8_t s = p[0] & 0x0f;
+            // srs_trace("ext_type:%hhu, size:%hhu, %hd,%hd", t, s + 1, rel_ext_size, ext_size);
+            if (t == 0xf0) {
+                type = std::string((char*)(p + 1), s + 1);
+                js[MTYPE] = type;
+                // srs_trace("type:%s", type.c_str());
+            } else if (t == 0xe0) {
+                astime = *(int64_t*)(p + 1);
+                js[ASTIME] = astime;
+                // srs_trace("astime:%lld", astime);
+            } else if (t == 0xd0) {
+                unique_id = *(uint64_t*)(p + 1);
+                js[PACKET_ID] = unique_id;
+                // srs_trace("unique_id:%llu", unique_id);
+            } else if (t == 0xc0) {
+                source_id = std::string((char*)(p + 1), s + 1);
+                js[ID] = source_id;
+                // srs_trace("source_id:%s", source_id.c_str());
+            }
+
+            rel_ext_size += (s + 1 + 1);
+            p += (s + 1 + 1);
+        }
+
+        srs_assert(rel_ext_size <= ext_size);
+    }
+
+    std::string head = js.dump();
+    // srs_trace("send js:%s\n", head.c_str());
+    uint16_t js_size = static_cast<uint16_t>(head.size());
+    // 前面8字节固定，不能改动
+    /*************************************************************
+     | total size(4bytes) | json size(4bytes) | json | raw data | 
+    **************************************************************/
+    uint32_t total_size = DATA_HEAD_SIZE + js_size + rtp_size;
+    QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
+
+    // big endian
+    uint8_t* data = (uint8_t*)packet->Data();
+
+    // write total_size
+    data[0] = ((total_size >> 24) & 0xff);
+    data[1] = ((total_size >> 16) & 0xff);
+    data[2] = ((total_size >> 8) & 0xff);
+    data[3] = (total_size & 0xff);
+
+    // json size
+    data[4] = ((js_size >> 24) & 0xff);
+    data[5] = ((js_size >> 16) & 0xff);
+    data[6] = ((js_size >> 8) & 0xff);
+    data[7] = (js_size & 0xff);
+    
+    // json data
+    memcpy(data + DATA_HEAD_SIZE, head.c_str(), js_size);
+
+    // raw payload data
+    memcpy(data + DATA_HEAD_SIZE + js_size, rtp_data, rtp_size);
+
+    return packet;
+}
+
+
+
 QnDataPacket::QnDataPacket(uint32_t size)
 {
     pfree_ = NULL;
@@ -101,14 +339,6 @@ QnDataPacket::~QnDataPacket()
     data_ = NULL;
     size_ = 0;
 }
-
-const std::string ID = "id";
-const std::string PACKET_ID = "packet_id";
-const std::string ASTIME = "astime";
-const std::string MTYPE = "mtype";
-const std::string PAYLOAD_TYPE = "pt";
-const std::string MARK_BIT = "mark";
-const std::string KEY_FRAME = "key";
 
 // mb20230308 自定义rtc consumer承接rtc数据
 QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
@@ -192,11 +422,11 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     // srs_trace("++++ stream:%s, pt:%d, audio:%d, key:%d, mark:%d, pack time:%lld\n", stream_url_.c_str(), pkt->payload_type(), 
     //             pkt->is_audio(), pkt->is_keyframe(), pkt->header.get_marker(), pkt->get_avsync_time());
 
-    if (!pkt->is_audio()) {
-        js[PAYLOAD_TYPE] = pkt->payload_type();
-        js[KEY_FRAME] = pkt->is_keyframe() ? 1 : 0;
-        js[MARK_BIT] = pkt->header.get_marker() ? 1 : 0;
-    }
+    // if (!pkt->is_audio()) {
+    //     js[PAYLOAD_TYPE] = pkt->payload_type();
+    //     js[KEY_FRAME] = pkt->is_keyframe() ? 1 : 0;
+    //     js[MARK_BIT] = pkt->header.get_marker() ? 1 : 0;
+    // }
 
     QnRtcManager::Instance()->OnConsumerData(rtc_data);
 
@@ -619,7 +849,6 @@ srs_error_t QnRtcManager::OnConsumerData(const QnRtcData_SharePtr& rtc_data)
     return srs_success;
 }
 
-const uint32_t DATA_HEAD_SIZE = 8;
 srs_error_t QnRtcManager::cycle()
 {
     srs_error_t err = srs_success;
@@ -1152,9 +1381,8 @@ srs_error_t HttpStreamSender::Start()
     };
 
     quit_ = false;
-    // todo
-    // thread_ = new std::thread(f);
-    // thread_->detach();
+    thread_ = new std::thread(f);
+    thread_->detach();
 
     started_ = true;
     return err;
@@ -1180,135 +1408,9 @@ srs_error_t HttpStreamSender::Send(TransMsg* msg)
     }
 
     pthread_mutex_lock(&mutex_);
-    // todo
-    size_t size;
-    Msg2RtpExt(msg->packet, size);
-    delete msg;
-    //vec_msgs_.push_back(msg);
+    vec_msgs_.push_back(msg);
     pthread_mutex_unlock(&mutex_);
     return err;
-}
-
-uint8_t* HttpStreamSender::Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
-{
-    // 发送格式只能是4字节的长度 + rtp包，把json格式的数据写入rtp扩展
-    // big endian
-    uint8_t* data = (uint8_t*)packet->Data();
-
-    uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-    uint16_t js_size = (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | data[7];
-
-    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
-
-    json js;
-    std::string head((char*)data + DATA_HEAD_SIZE, js_size);
-    js = json::parse(head);
-
-    uint64_t unique_id;
-    json_do_default(unique_id, js[PACKET_ID], 0);
-
-    std::string type;
-    json_do_default(type, js[MTYPE], "unknow");
-
-    int64_t astime;
-    json_do_default(astime, js[ASTIME], 0);
-
-    uint32_t rtp_size = total_size - DATA_HEAD_SIZE - js_size;
-    uint8_t* rtp_data = data + DATA_HEAD_SIZE + js_size;
-
-    // 找到扩展头的位置
-    int16_t ext_size = 0;
-    bool have_ext = rtp_data[0] & 0x10;
-    int16_t rel_ext_size = 0;
-    uint8_t cc = rtp_data[0] & 0x0f;
-    uint8_t* ext_data = rtp_data + 12 + 4 * cc;
-
-    if (have_ext) {
-        srs_assert(ext_data[0] == 0xDE);
-        srs_assert(ext_data[1] == 0xBE);
-        ext_size = (ext_data[2] << 8) | ext_data[3];
-        ext_size *= 4;
-        uint8_t* p = ext_data + 4;
-        while (*p != 0) {
-            uint8_t type = p[0] & 0xf0;
-            uint8_t size = p[0] & 0x0f;
-            rel_ext_size += (size + 1);
-            p += (size + 1);
-            srs_trace("ext_type:%hhu, size:%hhu", type, size);
-        }
-
-        srs_assert(rel_ext_size <= ext_size);
-    }
-
-    uint32_t new_ext_size = rel_ext_size;
-    new_ext_size += sizeof(unique_id);
-    new_ext_size += 1;
-    new_ext_size += type.size();
-    new_ext_size += 1;
-    new_ext_size += sizeof(astime);
-    new_ext_size += 1;
-
-    uint32_t new_pad_count = (new_ext_size % 4 == 0) ? 0 : (4 - new_ext_size % 4);
-    new_ext_size += new_pad_count;
-
-    uint32_t payload_size = rtp_size - 12 + 4 * cc;
-    uint8_t* payload_addr = rtp_data + 12 + 4 * cc;
-    if (have_ext) {
-        payload_size -= (4 + ext_size);
-        payload_addr += (4 + ext_size);
-    }
-
-    uint32_t new_total_size = DATA_HEAD_SIZE + 12 + 4 * cc + 4 + new_ext_size + payload_size;
-
-    uint8_t* data_new = new uint8_t[new_total_size];
-    srs_assert(data_new);
-
-    uint8_t* data_write = data_new + DATA_HEAD_SIZE;
-    memcpy(data_write, rtp_data, 12 + 4 * cc);
-    data_write += (12 + 4 * cc);
-
-    data_write[0] = 0xDE;
-    data_write[1] = 0xBE;
-    data_write[3] = ((new_ext_size / 4) >> 8) & 0xff;
-    data_write[4] = ((new_ext_size / 4) & 0xff);
-    data_write += 4;
-
-    if (rel_ext_size > 0) {
-        memcpy(data_write, ext_data + 4, rel_ext_size);
-        data_write += rel_ext_size;
-    }
-
-    // 新加扩展
-    data_write[0] = 0x10 | (sizeof(unique_id) - 1);     // 扩展类型使用1
-    data_write++;
-    *(uint64_t*)data_write = unique_id;
-    data_write += sizeof(unique_id);
-
-    data_write[0] = 0xf0 | (sizeof(astime) - 1);
-    data_write++;
-    *(int64_t*)data_write = astime;
-    data_write += sizeof(astime);
-
-    data_write[0] = 0xe0 | (type.size() - 1);
-    data_write++;
-    memcpy(data_write, type.c_str(), type.size());
-    data_write += type.size();
-
-    if (new_pad_count > 0) {
-        memset(data_write, 0, new_pad_count);
-    }
-
-    data_write = data_new + DATA_HEAD_SIZE + 12 + 4 * cc + 4 + new_ext_size;
-    memcpy(data_write, payload_addr, payload_size);
-
-    // write total_size
-    data_new[0] = ((new_total_size >> 24) & 0xff);
-    data_new[1] = ((new_total_size >> 16) & 0xff);
-    data_new[2] = ((new_total_size >> 8) & 0xff);
-    data_new[3] = (new_total_size & 0xff);
-
-    size = new_total_size;
-    return data_new;
 }
 
 static size_t StreamSenderReadCallback(char *dest, size_t size, size_t nmemb, void *userp)

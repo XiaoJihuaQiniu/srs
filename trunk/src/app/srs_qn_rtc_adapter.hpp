@@ -308,8 +308,7 @@ public:
     srs_error_t Send(TransMsg* msg);
 
     size_t SendMoreCallback(char *dest, size_t size, size_t nmemb);
-    static uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size);
-    
+
 private:
     void SendProc();
     void CleanInput();
