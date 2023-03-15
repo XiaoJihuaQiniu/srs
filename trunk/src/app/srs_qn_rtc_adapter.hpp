@@ -305,6 +305,14 @@ public:
     srs_error_t Start();
     void Stop();
     srs_error_t Send(TransMsg* msg);
+
+private:
+    char* Msg2Rtp(TransMsg* msg);
+
+private:
+    bool started_;
+    std::thread thread_;
+    std::vector<TransMsg*> vec_msgs_;
 };
 
 typedef std::function<void (const std::string& flag, TransMsg* msg)> StreamRecvCbType;
@@ -336,6 +344,12 @@ public:
 
     srs_error_t Start();
     void Stop();
+
+    TransMsg* Rtp2Msg(char* data, uint32_t size);
+
+private:
+    bool started_;
+    std::thread thread_; 
 };
 
 #endif /* QN_APP_RTC_HPP */

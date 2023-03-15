@@ -1138,7 +1138,17 @@ void HttpStreamSender::Stop()
 srs_error_t HttpStreamSender::Send(TransMsg* msg)
 {
     srs_error_t err = srs_success;
+    if (!started_) {
+        delete msg;
+    }
+
+    vec_msgs_.push_back(msg);
     return err;
+}
+
+char* HttpStreamSender::Msg2Rtp(TransMsg* msg)
+{
+
 }
 
 
@@ -1163,4 +1173,9 @@ srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
 void HttpStreamReceiver::Stop()
 {
 
+}
+
+TransMsg* HttpStreamReceiver::Rtp2Msg(char* data, uint32_t size)
+{
+    return NULL;
 }
