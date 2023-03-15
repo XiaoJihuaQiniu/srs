@@ -905,6 +905,13 @@ srs_error_t QnLoopTransport::cycle()
 }
 
 
+struct TransMsg
+{
+    std::string stream_url;
+    int32_t type;
+    QnDataPacket_SharePtr packet;
+};
+
 QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback) :
                                                 QnTransport(name, callback)
 {
@@ -947,17 +954,26 @@ uint32_t QnSocketPairTransport::GetResverdSize()
 srs_error_t QnSocketPairTransport::Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet)
 {
     srs_error_t err = srs_success;
+    TransMsg* msg = new TransMsg;
+    msg->stream_url = stream_url;
+    msg->type = type;
+    msg->packet = packet;
 
-    ssize_t write_size = srs_write(rwfd_, packet->Data(), packet->Size(), 2000000);
+    ssize_t write_size = srs_write(rwfd_, &msg, sizeof(msg), 2000000);
     if (write_size < 0) {
         srs_trace("st write error %s(%d)", strerror(errno), errno);
         return srs_error_wrap(err, "st_write error");
     }
 
-    if (write_size < packet->Size()) {
-        srs_trace("st write timeout %s(%d)", strerror(errno), errno);
-        return srs_error_wrap(err, "st_write timeout");
-    }
+    // ssize_t write_size = srs_write(rwfd_, packet->Data(), packet->Size(), 2000000);
+    // if (write_size < 0) {
+    //     srs_trace("st write error %s(%d)", strerror(errno), errno);
+    //     return srs_error_wrap(err, "st_write error");
+    // }
+    // if (write_size < packet->Size()) {
+    //     srs_trace("st write timeout %s(%d)", strerror(errno), errno);
+    //     return srs_error_wrap(err, "st_write timeout");
+    // }
 
     return err;
 }
@@ -974,16 +990,22 @@ srs_error_t QnSocketPairTransport::cycle()
             return srs_error_wrap(err, "buffer cache");
         }
 
-        if (!buffer) {
-            buffer = new char[max_buf_size_];
-            if (!buffer) {
-                srs_error("new buffer error");
-                srs_usleep(10000);
-                continue;
-            }
-        }        
+        // if (!buffer) {
+        //     buffer = new char[max_buf_size_];
+        //     if (!buffer) {
+        //         srs_error("new buffer error");
+        //         srs_usleep(10000);
+        //         continue;
+        //     }
+        // }
+        // ssize_t read_size = srs_read(rwfd_, buffer, max_buf_size_, 5000000);
+        // if (read_size < 0) {
+        //     srs_trace("st read error %s(%d)", strerror(errno), errno);
+        //     continue;
+        // }
 
-        ssize_t read_size = srs_read(rwfd_, buffer, max_buf_size_, 5000000);
+        TransMsg* msg = NULL;
+        ssize_t read_size = srs_read(rwfd_, &msg, sizeof(msg), 5000000);
         if (read_size < 0) {
             srs_trace("st read error %s(%d)", strerror(errno), errno);
             continue;
@@ -994,8 +1016,10 @@ srs_error_t QnSocketPairTransport::cycle()
         }
 
         if (recv_callback_) {
-            QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(buffer, read_size);
-            buffer = NULL;
+            // QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(buffer, read_size);
+            // buffer = NULL;
+            QnDataPacket_SharePtr packet = msg->packet;
+            delete msg;
             recv_callback_(name_, packet);
         }
     }
