@@ -183,6 +183,11 @@ public:
     srs_error_t OnRtcData(const QnRtcData_SharePtr& rtc_data);
 
     virtual srs_error_t cycle();
+
+private:
+    void StartSubscribe(const std::string stream_url);
+    void StopSubscibe(const std::string stream_url);
+
 private:
     QnRtcManager();
     virtual ~QnRtcManager();
@@ -245,8 +250,9 @@ private:
 class StreamSender;
 class StreamReceiver;
 
-struct TransMsg
+class TransMsg
 {
+public:
     std::string stream_url;
     int32_t type;
     QnDataPacket_SharePtr packet;
@@ -360,11 +366,22 @@ public:
     srs_error_t Start();
     void Stop();
 
-    TransMsg* Rtp2Msg(char* data, uint32_t size);
+    size_t RecvMoreCallback(char *dest, size_t size, size_t nmemb);
+
+private:
+    void RecvProc();
 
 private:
     bool started_;
-    std::thread* thread_; 
+    bool quit_;
+    uint64_t session_;
+    int64_t tick_start_;
+    bool first_send_cb_;
+    std::thread* thread_;
+    pthread_mutex_t mutex_;
+    char* buf_write_;
+    uint32_t data_size_;
+    uint32_t buf_offset_;
 };
 
 #endif /* QN_APP_RTC_HPP */

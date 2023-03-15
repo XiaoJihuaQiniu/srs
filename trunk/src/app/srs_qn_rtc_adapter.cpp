@@ -797,6 +797,7 @@ srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
                     req_stream->producer->on_publish();
                 }
                 req_stream->enable = true;
+                StartSubscribe(stream_url);
             }
         }
         
@@ -818,6 +819,7 @@ srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
 
     req_stream->producer->on_publish();
     req_stream->enable = true;
+    StartSubscribe(stream_url);
 
     srs_trace("user inserted, user:%p, left users:%d\n", user, req_stream->users.size());
     return srs_success;
@@ -844,6 +846,7 @@ srs_error_t QnRtcManager::StopRequestStream(SrsRequest* req, void* user)
                 req_stream->enable = false;
                 if (req_stream->producer){
                     req_stream->producer->on_unpublish();
+                    StopSubscibe(stream_url);
                 }
             }
         }
@@ -868,6 +871,22 @@ srs_error_t QnRtcManager::OnRtcData(const QnRtcData_SharePtr& rtc_data)
     vec_consumer_data_.push_back(rtc_data);
     srs_cond_signal(consumer_data_cond_);
     return srs_success;
+}
+
+void QnRtcManager::StartSubscribe(const std::string stream_url)
+{
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+    rtc_data->SetStreamUrl(stream_url);
+    rtc_data->SetType(en_RtcDataType_RequestStream);
+    OnRtcData(rtc_data);
+}
+
+void QnRtcManager::StopSubscibe(const std::string stream_url)
+{
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+    rtc_data->SetStreamUrl(stream_url);
+    rtc_data->SetType(en_RtcDataType_StopStream);
+    OnRtcData(rtc_data);
 }
 
 srs_error_t QnRtcManager::cycle()
@@ -1249,12 +1268,14 @@ srs_error_t QnSocketPairTransport::cycle()
         }
 
         srs_assert(msg);
+        srs_assert(msg->type == en_RtcDataType_Media);
 
         if (recv_callback_) {
             QnDataPacket_SharePtr packet = msg->packet;
-            delete msg;
             recv_callback_(name_, packet);
         }
+
+        delete msg;
     }
 
     srs_trace("QnSocketPairTransport thread quit... \n");
@@ -1356,11 +1377,12 @@ void QnSocketPairTransport::deal_request_msg(TransMsg* msg)
         }
 
         auto f = [&](const std::string& flag, TransMsg* msg) {
-            // TODO
             if (map_stream_receivers_.find(flag) == map_stream_receivers_.end()) {
                 srs_error("stream %s not exist\n", flag.c_str());
+                delete msg;
+            } else {
+                write(fds_[1], &msg, sizeof(msg));
             }
-            delete msg;
         };
 
         StreamReceiver* stream_receiver = new HttpStreamReceiver(gate_server_, stream_url, f);
@@ -1414,13 +1436,16 @@ srs_error_t HttpStreamSender::Start()
     srs_trace("start stream sender, %s\n", stream_url_.c_str());
     auto f = [&]() {
         SendProc();
+        started_ = false;
     };
 
     quit_ = false;
+    started_ = true;
+    if (thread_) {
+        delete thread_;
+    }
     thread_ = new std::thread(f);
     thread_->detach();
-
-    started_ = true;
     return err;
 }
 
@@ -1463,7 +1488,7 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
 
     if (quit_) {
         srs_trace("return for quit send %s", stream_url_.c_str());
-        return CURL_READFUNC_ABORT ;
+        return CURL_READFUNC_ABORT;
     }
 
     size_t buffer_size = size * nmemb;
@@ -1540,7 +1565,7 @@ void HttpStreamSender::SendProc()
 
         struct curl_slist *chunk = NULL;
         std::string session_id = "x-miku-session-id: " + std::to_string(session_);
-        chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
+        // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
         chunk = curl_slist_append(chunk, "Expect: 100-continue");
         chunk = curl_slist_append(chunk, session_id.c_str());
         res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
@@ -1580,7 +1605,14 @@ void HttpStreamSender::CleanInput()
 HttpStreamReceiver::HttpStreamReceiver(const std::string gate_server, const std::string& stream_url, const StreamRecvCbType& callback) : 
                         StreamReceiver(gate_server, stream_url, callback)
 {
+    pthread_mutex_init(&mutex_, NULL);
+    started_ = false;
+    quit_ = false;
+    thread_ = NULL;
 
+    buf_write_ = NULL;
+    data_size_ = 0;
+    buf_offset_ = 0;
 }
 
 HttpStreamReceiver::~HttpStreamReceiver()
@@ -1591,15 +1623,143 @@ HttpStreamReceiver::~HttpStreamReceiver()
 srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
 {
     srs_error_t err = srs_success;
+    if (started_) {
+        srs_trace("stream receiver already started, %s\n", stream_url_.c_str());
+        return err;
+    }
+
+    srs_trace("start stream receiver, %s\n", stream_url_.c_str());
+    auto f = [&]() {
+        RecvProc();
+        started_ = false;
+    };
+
+    quit_ = false;
+    started_ = true;
+    if (thread_) {
+        delete thread_;
+    }
+    thread_ = new std::thread(f);
+    thread_->detach();
     return err;
 }
 
 void HttpStreamReceiver::Stop()
 {
-
+    srs_trace("stop stream receiver, %s\n", stream_url_.c_str());
+    quit_ = true;
+    started_ = false;
 }
 
-TransMsg* HttpStreamReceiver::Rtp2Msg(char* data, uint32_t size)
+static size_t StreamReceiverReadCallback(char *dest, size_t size, size_t nmemb, void *userp)
 {
-    return NULL;
+    return ((HttpStreamReceiver*)userp)->RecvMoreCallback(dest, size, nmemb);
+}
+
+size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nmemb)
+{
+    if (first_send_cb_) {
+        first_send_cb_ = false;
+        srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
+    }
+
+    if (quit_) {
+        srs_trace("return for quit send %s", stream_url_.c_str());
+        return CURL_WRITEFUNC_ERROR;
+    }
+
+    size_t buffer_size = size * nmemb;
+    srs_trace("RecvMoreCallback, buffer:%p, size:%u", buffer, size);
+
+    char* data_read = buffer;
+    size_t size_left = buffer_size;
+
+    while (size_left > 0) {
+
+        if (!buf_write_) {
+            uint8_t* data = (uint8_t*)data_read;
+            // 前4个字节总大小
+            uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+            srs_assert(total_size > 4);
+            buf_write_ = new char[total_size];
+            srs_assert(buf_write_);
+            data_size_ = total_size;
+            buf_offset_ = 0;
+        }
+
+        uint32_t size_need = data_size_ - buf_offset_;
+
+        if (size_need <= size_left) {
+            memcpy(buf_write_ + buf_offset_, data_read, size_need);
+            size_left -= size_need;
+            data_read += size_need;
+            srs_trace("receive packet, size:%u", data_size_);
+
+            if (recv_callback_) {
+                TransMsg* msg = new TransMsg;
+                srs_assert(msg);
+                msg->stream_url = stream_url_;
+                msg->type = en_RtcDataType_Media;
+                msg->packet = MsgFromRtpExt(stream_url_, (uint8_t*)buf_write_, data_size_);
+                recv_callback_(stream_url_, msg);
+            }
+
+            delete[] buf_write_;
+            buf_write_ = NULL;
+
+        } else {
+            memcpy(buf_write_ + buf_offset_, data_read, size_left);
+            buf_offset_ += size_left;
+            size_left = 0;
+        }
+    }
+
+    return buffer_size;
+}
+
+void HttpStreamReceiver::RecvProc()
+{
+    srs_trace("thread for stream receiver start, %s", stream_url_.c_str());
+
+    session_ = (uint64_t)srs_update_system_time();
+    tick_start_ = srs_update_system_time();
+    first_send_cb_ = true;
+
+    CURL *curl;
+    CURLcode res;
+
+    res = curl_global_init(CURL_GLOBAL_DEFAULT);
+    /* Check for errors */
+    if(res != CURLE_OK) {
+        srs_error("curl_global_init() failed: %s\n", curl_easy_strerror(res));
+        return;
+    }
+
+    curl = curl_easy_init();
+    if (curl) {
+        std::string url = "http://" + gate_server_ + qn_get_origin_stream(stream_url_);
+        srs_trace("stream receive from %s\n", url.c_str());
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamReceiverReadCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, this);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+        struct curl_slist *chunk = NULL;
+        std::string session_id = "x-miku-session-id: " + std::to_string(session_);
+        // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
+        // chunk = curl_slist_append(chunk, "Expect: 100-continue");
+        chunk = curl_slist_append(chunk, session_id.c_str());
+        res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        curl_slist_free_all(chunk);
+        curl_easy_cleanup(curl);
+    }
+
+    srs_trace("thread for stream receiver quit..., %s", stream_url_.c_str());
 }
