@@ -77,8 +77,8 @@ public:
     // When source id changed, notice client to print.
     void update_source_id();
 
-    srs_error_t on_publish() { return srs_success; };   //TODO
-    srs_error_t on_unpublish() { return srs_success; }; //TODO
+    srs_error_t on_publish();
+    srs_error_t on_unpublish();
     
     // Put RTP packet into queue.
     // @note We do not drop packet here, but drop it in sender.
@@ -173,11 +173,14 @@ class QnRtcManager : public ISrsCoroutineHandler, public ISrsFastTimer
 public:
     static QnRtcManager* Instance();
 
+    // 请求媒体流，对应producer
     srs_error_t RequestStream(SrsRequest* req, void* user);
     srs_error_t StopRequestStream(SrsRequest* req, void* user);
     
+    // consumer用于导出媒体流
     srs_error_t AddConsumer(QnRtcConsumer* consumer);
-    srs_error_t OnConsumerData(const QnRtcData_SharePtr& rtc_data);
+
+    srs_error_t OnRtcData(const QnRtcData_SharePtr& rtc_data);
 
     virtual srs_error_t cycle();
 private:
@@ -316,6 +319,9 @@ private:
 private:
     bool started_;
     bool quit_;
+    uint64_t session_;
+    int64_t tick_start_;
+    bool first_send_cb_;
     std::thread* thread_;
     uint8_t* last_data_;
     size_t last_data_size_;

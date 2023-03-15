@@ -570,8 +570,9 @@ srs_error_t SrsRtcSource::on_publish()
     if (!qn_consumer_) {
         srs_trace("new QnRtcConsumer for source_id=%s/%s", _source_id.c_str(), _pre_source_id.c_str());
         qn_consumer_ = new QnRtcConsumer(this);
-        QnRtcManager::Instance()->AddConsumer(qn_consumer_);
     }
+
+    qn_consumer_->on_publish();
 
     // Notify the consumers about stream change event.
     if ((err = on_source_changed()) != srs_success) {
@@ -619,6 +620,10 @@ void SrsRtcSource::on_unpublish()
 
     is_created_ = false;
     is_delivering_packets_ = false;
+
+    if (qn_consumer_) {
+        qn_consumer_->on_unpublish();
+    }
 
     if (!_source_id.empty()) {
         _pre_source_id = _source_id;

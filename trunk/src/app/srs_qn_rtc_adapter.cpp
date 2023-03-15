@@ -84,6 +84,7 @@ uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
 
     uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
     uint16_t js_size = (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | data[7];
+    srs_assert(total_size == packet->Size());
 
     json js;
     std::string head((char*)data + DATA_HEAD_SIZE, js_size);
@@ -363,6 +364,8 @@ QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
     if (_srs_hybrid && _srs_hybrid->timer1s()) {
         _srs_hybrid->timer1s()->subscribe(this);
     }
+
+    QnRtcManager::Instance()->AddConsumer(this);
 }
 
 QnRtcConsumer::~QnRtcConsumer()
@@ -374,6 +377,24 @@ void QnRtcConsumer::update_source_id()
     srs_trace("QnRtcConsumer of %s, update source_id=%s/%s", stream_url_.c_str(), 
                 source_->source_id().c_str(), source_->pre_source_id().c_str());
     source_id_ = source_->source_id().get_value();
+}
+
+srs_error_t QnRtcConsumer::on_publish()
+{
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+    rtc_data->SetStreamUrl(stream_url_);
+    rtc_data->SetType(en_RtcDataType_PublishStream);
+    QnRtcManager::Instance()->OnRtcData(rtc_data);
+    return srs_success;
+}
+
+srs_error_t QnRtcConsumer::on_unpublish()
+{
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+    rtc_data->SetStreamUrl(stream_url_);
+    rtc_data->SetType(en_RtcDataType_UnPublishStream);
+    QnRtcManager::Instance()->OnRtcData(rtc_data);
+    return srs_success;
 }
 
 srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
@@ -428,7 +449,7 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     //     js[MARK_BIT] = pkt->header.get_marker() ? 1 : 0;
     // }
 
-    QnRtcManager::Instance()->OnConsumerData(rtc_data);
+    QnRtcManager::Instance()->OnRtcData(rtc_data);
 
     return srs_success;
 }
@@ -842,7 +863,7 @@ srs_error_t QnRtcManager::AddConsumer(QnRtcConsumer* consumer)
     return srs_success;
 }
 
-srs_error_t QnRtcManager::OnConsumerData(const QnRtcData_SharePtr& rtc_data)
+srs_error_t QnRtcManager::OnRtcData(const QnRtcData_SharePtr& rtc_data)
 {
     vec_consumer_data_.push_back(rtc_data);
     srs_cond_signal(consumer_data_cond_);
@@ -871,6 +892,14 @@ srs_error_t QnRtcManager::cycle()
 
         QnRtcData_SharePtr rtc_data = *it;
         vec_consumer_data_.erase(it);
+    
+        // 非媒体数据的控制消息
+        if (rtc_data->Type() != en_RtcDataType_Media) {        
+            if (transport_) {
+                transport_->Send(rtc_data->StreamUrl(), rtc_data->Type(), nullptr);
+            }
+            continue;
+        }
 
         json& js = rtc_data->Head();
         // 添加系列号以判断是否数据有丢失
@@ -1262,8 +1291,13 @@ void QnSocketPairTransport::thread_process()
             msg->type == en_RtcDataType_PublishStream || 
             msg->type == en_RtcDataType_UnPublishStream) {
             deal_publish_msg(msg);
-        } else {
+        } else 
+        if (msg->type == en_RtcDataType_RequestStream || 
+            msg->type == en_RtcDataType_StopStream) {
             deal_request_msg(msg);
+        } else {
+            srs_error("unknow msg type:%d", msg->type);
+            delete msg;
         }
     }
 
@@ -1292,6 +1326,7 @@ void QnSocketPairTransport::deal_publish_msg(TransMsg* msg)
     srs_assert(stream_sender);
 
     if ((msg->type == en_RtcDataType_PublishStream) || new_sender) {
+        srs_trace("start sender for publish %s", stream_url.c_str());
         stream_sender->Start();
         delete msg;
         return;
@@ -1303,6 +1338,7 @@ void QnSocketPairTransport::deal_publish_msg(TransMsg* msg)
     }
 
     if (msg->type == en_RtcDataType_UnPublishStream) {
+        srs_trace("stop sender for publish %s", stream_url.c_str());
         stream_sender->Stop();
         delete msg;
         return;
@@ -1420,8 +1456,14 @@ static size_t StreamSenderReadCallback(char *dest, size_t size, size_t nmemb, vo
 
 size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
 {
+    if (first_send_cb_) {
+        first_send_cb_ = false;
+        srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
+    }
+
     if (quit_) {
-        return 0;
+        srs_trace("return for quit send %s", stream_url_.c_str());
+        return CURL_READFUNC_ABORT ;
     }
 
     size_t buffer_size = size * nmemb;
@@ -1432,7 +1474,8 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
             pthread_mutex_unlock(&mutex_);
             usleep(2000);
             if (quit_) {
-                return 0;
+                srs_trace("return for quit send %s", stream_url_.c_str());
+                return CURL_READFUNC_ABORT ;
             }
             pthread_mutex_lock(&mutex_);
         }
@@ -1454,6 +1497,7 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
         last_data_ = NULL;
         last_data_size_ = 0;
         last_data_offset_ = 0;
+        // srs_trace("SendMoreCallback dest:%p, need:%d, write:%d", dest, buffer_size, size);
         return size;
     }
 
@@ -1461,12 +1505,17 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
     last_data_size_ -= buffer_size;
     last_data_offset_ += buffer_size;
 
+    // srs_trace("SendMoreCallback dest:%p, need:%d, write:%d", dest, buffer_size, buffer_size);
     return buffer_size;
 }
 
 void HttpStreamSender::SendProc()
 {
     srs_trace("thread for stream sender start, %s", stream_url_.c_str());
+
+    session_ = (uint64_t)srs_update_system_time();
+    tick_start_ = srs_update_system_time();
+    first_send_cb_ = true;
 
     CURL *curl;
     CURLcode res;
@@ -1480,7 +1529,8 @@ void HttpStreamSender::SendProc()
 
     curl = curl_easy_init();
     if (curl) {
-        std::string url = "http://" + gate_server_ + "?streamId=" + stream_url_;
+        std::string url = "http://" + gate_server_ + stream_url_;
+        srs_trace("stream send to %s\n", url.c_str());
 
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
@@ -1489,8 +1539,10 @@ void HttpStreamSender::SendProc()
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
         struct curl_slist *chunk = NULL;
+        std::string session_id = "x-miku-session-id: " + std::to_string(session_);
         chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
         chunk = curl_slist_append(chunk, "Expect: 100-continue");
+        chunk = curl_slist_append(chunk, session_id.c_str());
         res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
 
         res = curl_easy_perform(curl);
