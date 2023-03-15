@@ -5,6 +5,7 @@
 #include <srs_app_hybrid.hpp>
 #include <srs_app_server.hpp>
 #include <srs_app_rtc_source.hpp>
+#include <libcurl/curl.h>
 
 #define json_value(type, v, tag) type v; const std::string tag_##v = #tag
 #define json_value_str(type, v, tag) type v; const std::string tag_##v = tag
