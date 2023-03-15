@@ -619,6 +619,7 @@ srs_error_t QnRtcManager::OnConsumerData(const QnRtcData_SharePtr& rtc_data)
     return srs_success;
 }
 
+const uint32_t DATA_HEAD_SIZE = 8;
 srs_error_t QnRtcManager::cycle()
 {
     srs_error_t err = srs_success;
@@ -653,7 +654,7 @@ srs_error_t QnRtcManager::cycle()
         /*************************************************************
          | total size(4bytes) | json size(4bytes) | json | raw data | 
         **************************************************************/
-        uint32_t total_size = 8 + js_size + rtc_data->Payload()->Size();
+        uint32_t total_size = DATA_HEAD_SIZE + js_size + rtc_data->Payload()->Size();
         QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
 
         // big endian
@@ -672,10 +673,10 @@ srs_error_t QnRtcManager::cycle()
         data[7] = (js_size & 0xff);
         
         // json data
-        memcpy(data + 8, head.c_str(), js_size);
+        memcpy(data + DATA_HEAD_SIZE, head.c_str(), js_size);
 
         // raw payload data
-        memcpy(data + 8 + js_size, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
+        memcpy(data + DATA_HEAD_SIZE + js_size, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
 
         if (transport_) {
             transport_->Send(rtc_data->StreamUrl(), rtc_data->Type(), packet);
@@ -699,7 +700,7 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
 
     json& js = rtc_data->Head();
-    std::string head((char*)data + 8, js_size);
+    std::string head((char*)data + DATA_HEAD_SIZE, js_size);
     // srs_trace("recv js:%s\n", head.c_str());
     js = json::parse(head);
 
@@ -727,8 +728,8 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
         return err;
     }
 
-    char* payload = (char*)data + 8 + js_size;
-    uint32_t payload_size = total_size - js_size - 8;
+    char* payload = (char*)data + DATA_HEAD_SIZE + js_size;
+    uint32_t payload_size = total_size - js_size - DATA_HEAD_SIZE;
     QnDataPacket_SharePtr payload_packet = std::make_shared<QnDataPacket>(payload_size);
     memcpy(payload_packet->Data(), payload, payload_size);
     // srs_trace("total_size:%u, jsoffset:%u, jssize:%d, payload size:%u\n", total_size, js_offset, js_size, payload_size);
@@ -929,6 +930,12 @@ QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const Tran
     packet_cond_ = srs_cond_new();
     trd_ = new SrsSTCoroutine("sockpair-transport", this);
     trd_->start();
+
+    char const *val = getenv("GATE_SERVER");
+    if (val) {
+        gate_server_ = std::string(val);
+        srs_trace("gate server: %s", gate_server_.c_str());
+    }
 }
 
 QnSocketPairTransport::~QnSocketPairTransport()
@@ -1117,7 +1124,13 @@ void QnSocketPairTransport::deal_request_msg(TransMsg* msg)
 HttpStreamSender::HttpStreamSender(const std::string gate_server, const std::string& stream_url) : 
                                     StreamSender(gate_server, stream_url)
 {
-
+    pthread_mutex_init(&mutex_, NULL);
+    started_ = false;
+    quit_ = false;
+    thread_ = NULL;
+    last_data_ = NULL;
+    last_data_size_ = 0;
+    last_data_offset_ = 0;
 }
 
 HttpStreamSender::~HttpStreamSender()
@@ -1128,12 +1141,30 @@ HttpStreamSender::~HttpStreamSender()
 srs_error_t HttpStreamSender::Start()
 {
     srs_error_t err = srs_success;
+    if (started_) {
+        srs_trace("stream sender already started, %s\n", stream_url_.c_str());
+        return err;
+    }
+
+    srs_trace("start stream sender, %s\n", stream_url_.c_str());
+    auto f = [&]() {
+        SendProc();
+    };
+
+    quit_ = false;
+    // todo
+    // thread_ = new std::thread(f);
+    // thread_->detach();
+
+    started_ = true;
     return err;
 }
 
 void HttpStreamSender::Stop()
 {
-
+    srs_trace("stop stream sender, %s\n", stream_url_.c_str());
+    quit_ = true;
+    started_ = false;
 }
 
 srs_error_t HttpStreamSender::Send(TransMsg* msg)
@@ -1143,13 +1174,251 @@ srs_error_t HttpStreamSender::Send(TransMsg* msg)
         delete msg;
     }
 
-    vec_msgs_.push_back(msg);
+    if (msg->type != en_RtcDataType_Media) {
+        srs_trace("do not send msg of type %d", msg->type);
+        return err;
+    }
+
+    pthread_mutex_lock(&mutex_);
+    // todo
+    size_t size;
+    Msg2RtpExt(msg->packet, size);
+    delete msg;
+    //vec_msgs_.push_back(msg);
+    pthread_mutex_unlock(&mutex_);
     return err;
 }
 
-char* HttpStreamSender::Msg2Rtp(TransMsg* msg)
+uint8_t* HttpStreamSender::Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
 {
+    // 发送格式只能是4字节的长度 + rtp包，把json格式的数据写入rtp扩展
+    // big endian
+    uint8_t* data = (uint8_t*)packet->Data();
 
+    uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+    uint16_t js_size = (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | data[7];
+
+    QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
+
+    json js;
+    std::string head((char*)data + DATA_HEAD_SIZE, js_size);
+    js = json::parse(head);
+
+    uint64_t unique_id;
+    json_do_default(unique_id, js[PACKET_ID], 0);
+
+    std::string type;
+    json_do_default(type, js[MTYPE], "unknow");
+
+    int64_t astime;
+    json_do_default(astime, js[ASTIME], 0);
+
+    uint32_t rtp_size = total_size - DATA_HEAD_SIZE - js_size;
+    uint8_t* rtp_data = data + DATA_HEAD_SIZE + js_size;
+
+    // 找到扩展头的位置
+    int16_t ext_size = 0;
+    bool have_ext = rtp_data[0] & 0x10;
+    int16_t rel_ext_size = 0;
+    uint8_t cc = rtp_data[0] & 0x0f;
+    uint8_t* ext_data = rtp_data + 12 + 4 * cc;
+
+    if (have_ext) {
+        srs_assert(ext_data[0] == 0xDE);
+        srs_assert(ext_data[1] == 0xBE);
+        ext_size = (ext_data[2] << 8) | ext_data[3];
+        ext_size *= 4;
+        uint8_t* p = ext_data + 4;
+        while (*p != 0) {
+            uint8_t type = p[0] & 0xf0;
+            uint8_t size = p[0] & 0x0f;
+            rel_ext_size += (size + 1);
+            p += (size + 1);
+            srs_trace("ext_type:%hhu, size:%hhu", type, size);
+        }
+
+        srs_assert(rel_ext_size <= ext_size);
+    }
+
+    uint32_t new_ext_size = rel_ext_size;
+    new_ext_size += sizeof(unique_id);
+    new_ext_size += 1;
+    new_ext_size += type.size();
+    new_ext_size += 1;
+    new_ext_size += sizeof(astime);
+    new_ext_size += 1;
+
+    uint32_t new_pad_count = (new_ext_size % 4 == 0) ? 0 : (4 - new_ext_size % 4);
+    new_ext_size += new_pad_count;
+
+    uint32_t payload_size = rtp_size - 12 + 4 * cc;
+    uint8_t* payload_addr = rtp_data + 12 + 4 * cc;
+    if (have_ext) {
+        payload_size -= (4 + ext_size);
+        payload_addr += (4 + ext_size);
+    }
+
+    uint32_t new_total_size = DATA_HEAD_SIZE + 12 + 4 * cc + 4 + new_ext_size + payload_size;
+
+    uint8_t* data_new = new uint8_t[new_total_size];
+    srs_assert(data_new);
+
+    uint8_t* data_write = data_new + DATA_HEAD_SIZE;
+    memcpy(data_write, rtp_data, 12 + 4 * cc);
+    data_write += (12 + 4 * cc);
+
+    data_write[0] = 0xDE;
+    data_write[1] = 0xBE;
+    data_write[3] = ((new_ext_size / 4) >> 8) & 0xff;
+    data_write[4] = ((new_ext_size / 4) & 0xff);
+    data_write += 4;
+
+    if (rel_ext_size > 0) {
+        memcpy(data_write, ext_data + 4, rel_ext_size);
+        data_write += rel_ext_size;
+    }
+
+    // 新加扩展
+    data_write[0] = 0x10 | (sizeof(unique_id) - 1);     // 扩展类型使用1
+    data_write++;
+    *(uint64_t*)data_write = unique_id;
+    data_write += sizeof(unique_id);
+
+    data_write[0] = 0xf0 | (sizeof(astime) - 1);
+    data_write++;
+    *(int64_t*)data_write = astime;
+    data_write += sizeof(astime);
+
+    data_write[0] = 0xe0 | (type.size() - 1);
+    data_write++;
+    memcpy(data_write, type.c_str(), type.size());
+    data_write += type.size();
+
+    if (new_pad_count > 0) {
+        memset(data_write, 0, new_pad_count);
+    }
+
+    data_write = data_new + DATA_HEAD_SIZE + 12 + 4 * cc + 4 + new_ext_size;
+    memcpy(data_write, payload_addr, payload_size);
+
+    // write total_size
+    data_new[0] = ((new_total_size >> 24) & 0xff);
+    data_new[1] = ((new_total_size >> 16) & 0xff);
+    data_new[2] = ((new_total_size >> 8) & 0xff);
+    data_new[3] = (new_total_size & 0xff);
+
+    size = new_total_size;
+    return data_new;
+}
+
+static size_t StreamSenderReadCallback(char *dest, size_t size, size_t nmemb, void *userp)
+{
+    return ((HttpStreamSender*)userp)->SendMoreCallback(dest, size, nmemb);
+}
+
+size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
+{
+    if (quit_) {
+        return 0;
+    }
+
+    size_t buffer_size = size * nmemb;
+
+    if (!last_data_) {
+        pthread_mutex_lock(&mutex_);
+        while (vec_msgs_.empty()) {
+            pthread_mutex_unlock(&mutex_);
+            usleep(2000);
+            if (quit_) {
+                return 0;
+            }
+            pthread_mutex_lock(&mutex_);
+        }
+
+        auto it = vec_msgs_.begin();
+        TransMsg* msg = *it;
+        vec_msgs_.erase(it);
+        pthread_mutex_unlock(&mutex_);
+
+        last_data_ = Msg2RtpExt(msg->packet, last_data_size_);
+        last_data_offset_ = 0;
+        delete msg;
+    }
+
+    if (last_data_size_ < buffer_size) {
+        size_t size = last_data_size_;
+        memcpy(dest, last_data_ + last_data_offset_, size);
+        delete[] last_data_;
+        last_data_ = NULL;
+        last_data_size_ = 0;
+        last_data_offset_ = 0;
+        return size;
+    }
+
+    memcpy(dest, last_data_ + last_data_offset_, buffer_size);
+    last_data_size_ -= buffer_size;
+    last_data_offset_ += buffer_size;
+
+    return buffer_size;
+}
+
+void HttpStreamSender::SendProc()
+{
+    srs_trace("thread for stream sender start, %s", stream_url_.c_str());
+
+    CURL *curl;
+    CURLcode res;
+
+    res = curl_global_init(CURL_GLOBAL_DEFAULT);
+    /* Check for errors */
+    if(res != CURLE_OK) {
+        srs_error("curl_global_init() failed: %s\n", curl_easy_strerror(res));
+        return;
+    }
+
+    curl = curl_easy_init();
+    if (curl) {
+        std::string url = "http://" + gate_server_ + "?streamId=" + stream_url_;
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, StreamSenderReadCallback);
+        curl_easy_setopt(curl, CURLOPT_READDATA, this);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+        struct curl_slist *chunk = NULL;
+        chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
+        chunk = curl_slist_append(chunk, "Expect: 100-continue");
+        res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        curl_slist_free_all(chunk);
+        curl_easy_cleanup(curl);
+    }
+
+    CleanInput();
+    srs_trace("thread for stream sender quit..., %s", stream_url_.c_str());
+}
+
+void HttpStreamSender::CleanInput()
+{
+    for (;;) {
+        pthread_mutex_lock(&mutex_);
+        if (vec_msgs_.empty()) {
+            pthread_mutex_unlock(&mutex_);
+            break;
+        }
+
+        auto it = vec_msgs_.begin();
+        TransMsg* msg = *it;
+        vec_msgs_.erase(it);
+        pthread_mutex_unlock(&mutex_);
+        delete msg;
+    }
 }
 
 

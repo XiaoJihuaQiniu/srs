@@ -7,6 +7,7 @@
 #include <thread>
 #include <functional>
 #include <inttypes.h>
+#include <pthread.h>
 
 #include <srs_core.hpp>
 #include <srs_protocol_st.hpp>
@@ -306,12 +307,21 @@ public:
     void Stop();
     srs_error_t Send(TransMsg* msg);
 
+    size_t SendMoreCallback(char *dest, size_t size, size_t nmemb);
+    static uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size);
+    
 private:
-    char* Msg2Rtp(TransMsg* msg);
+    void SendProc();
+    void CleanInput();
 
 private:
     bool started_;
-    std::thread thread_;
+    bool quit_;
+    std::thread* thread_;
+    uint8_t* last_data_;
+    size_t last_data_size_;
+    size_t last_data_offset_;
+    pthread_mutex_t mutex_;
     std::vector<TransMsg*> vec_msgs_;
 };
 
@@ -349,7 +359,7 @@ public:
 
 private:
     bool started_;
-    std::thread thread_; 
+    std::thread* thread_; 
 };
 
 #endif /* QN_APP_RTC_HPP */
