@@ -1456,11 +1456,12 @@ HttpStreamSender::HttpStreamSender(const std::string gate_server, const std::str
 {
     pthread_mutex_init(&mutex_, NULL);
     started_ = false;
-    quit_ = false;
+    wait_quit_ = false;
     thread_ = NULL;
     last_data_ = NULL;
     last_data_size_ = 0;
     last_data_offset_ = 0;
+    session_ = (uint64_t)srs_update_system_time();
 }
 
 HttpStreamSender::~HttpStreamSender()
@@ -1471,7 +1472,7 @@ HttpStreamSender::~HttpStreamSender()
 srs_error_t HttpStreamSender::Start()
 {
     srs_error_t err = srs_success;
-    if (started_) {
+    if (started_ || wait_quit_) {
         srs_trace("stream sender already started, %s\n", stream_url_.c_str());
         return err;
     }
@@ -1479,10 +1480,10 @@ srs_error_t HttpStreamSender::Start()
     srs_trace("start stream sender, %s\n", stream_url_.c_str());
     auto f = [&]() {
         SendProc();
-        started_ = false;
+        wait_quit_ = false;
     };
 
-    quit_ = false;
+    wait_quit_ = false;
     started_ = true;
     if (thread_) {
         delete thread_;
@@ -1495,8 +1496,8 @@ srs_error_t HttpStreamSender::Start()
 void HttpStreamSender::Stop()
 {
     srs_trace("stop stream sender, %s\n", stream_url_.c_str());
-    quit_ = true;
-    // started_ = false;
+    wait_quit_ = true;
+    started_ = false;
 }
 
 srs_error_t HttpStreamSender::Send(TransMsg* msg)
@@ -1513,6 +1514,13 @@ srs_error_t HttpStreamSender::Send(TransMsg* msg)
     }
 
     pthread_mutex_lock(&mutex_);
+    if (vec_msgs_.size() >= 200) {
+        srs_error("too much(%d) packets wait to send, %s", vec_msgs_.size(), stream_url_.c_str());
+        delete msg;
+        pthread_mutex_unlock(&mutex_);
+        return err;
+    }
+
     vec_msgs_.push_back(msg);
     pthread_mutex_unlock(&mutex_);
     return err;
@@ -1530,7 +1538,7 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
         srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
     }
 
-    if (quit_) {
+    if (wait_quit_) {
         srs_trace("return for quit send %s", stream_url_.c_str());
         return CURL_READFUNC_ABORT;
     }
@@ -1542,7 +1550,7 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
         while (vec_msgs_.empty()) {
             pthread_mutex_unlock(&mutex_);
             usleep(2000);
-            if (quit_) {
+            if (wait_quit_) {
                 srs_trace("return for quit send %s", stream_url_.c_str());
                 return CURL_READFUNC_ABORT ;
             }
@@ -1586,47 +1594,62 @@ void HttpStreamSender::SendProc()
 {
     srs_trace("thread for stream sender start, %s", stream_url_.c_str());
 
-    session_ = (uint64_t)srs_update_system_time();
-    tick_start_ = srs_update_system_time();
-    first_send_cb_ = true;
+    // session_ = (uint64_t)srs_update_system_time();
+    tick_start_ = 0;
 
-    CURL *curl;
-    CURLcode res;
+    for (;;) {
 
-    res = curl_global_init(CURL_GLOBAL_DEFAULT);
-    /* Check for errors */
-    if(res != CURLE_OK) {
-        srs_error("curl_global_init() failed: %s\n", curl_easy_strerror(res));
-        return;
-    }
-
-    curl = curl_easy_init();
-    if (curl) {
-        std::string url = "http://" + gate_server_ + stream_url_;
-        srs_trace("stream send to %s\n", url.c_str());
-
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, StreamSenderReadCallback);
-        curl_easy_setopt(curl, CURLOPT_READDATA, this);
-        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-        struct curl_slist *chunk = NULL;
-        std::string session_id = "x-miku-session-id: " + std::to_string(session_);
-        // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
-        chunk = curl_slist_append(chunk, "Expect: 100-continue");
-        chunk = curl_slist_append(chunk, session_id.c_str());
-        res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
-
-        res = curl_easy_perform(curl);
-        if(res != CURLE_OK) {
-            srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        if (!started_) {
+            break;
         }
 
-        srs_trace("stream send to %s finished...\n", url.c_str());
+        int64_t t0 = srs_update_system_time();
+        if (t0 - tick_start_ < 5 * SRS_UTIME_SECONDS) {
+            usleep(20000);
+            continue;
+        }
 
-        curl_slist_free_all(chunk);
-        curl_easy_cleanup(curl);
+        tick_start_ = srs_update_system_time();
+        first_send_cb_ = true;
+
+        CURL *curl;
+        CURLcode res;
+
+        res = curl_global_init(CURL_GLOBAL_DEFAULT);
+        /* Check for errors */
+        if(res != CURLE_OK) {
+            srs_error("curl_global_init() failed: %s\n", curl_easy_strerror(res));
+            return;
+        }
+
+        curl = curl_easy_init();
+        if (curl) {
+            std::string url = "http://" + gate_server_ + stream_url_;
+            srs_trace("stream send to %s\n", url.c_str());
+
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            curl_easy_setopt(curl, CURLOPT_READFUNCTION, StreamSenderReadCallback);
+            curl_easy_setopt(curl, CURLOPT_READDATA, this);
+            curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+            struct curl_slist *chunk = NULL;
+            std::string session_id = "x-miku-session-id: " + std::to_string(session_);
+            // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
+            chunk = curl_slist_append(chunk, "Expect: 100-continue");
+            chunk = curl_slist_append(chunk, session_id.c_str());
+            res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+
+            res = curl_easy_perform(curl);
+            if(res != CURLE_OK) {
+                srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+            }
+
+            srs_trace("stream send to %s finished...\n", url.c_str());
+
+            curl_slist_free_all(chunk);
+            curl_easy_cleanup(curl);
+        }
     }
 
     CleanInput();

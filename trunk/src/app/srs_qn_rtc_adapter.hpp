@@ -333,7 +333,7 @@ private:
 
 private:
     bool started_;
-    bool quit_;
+    bool wait_quit_;
     uint64_t session_;
     int64_t tick_start_;
     bool first_send_cb_;
