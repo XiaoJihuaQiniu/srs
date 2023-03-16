@@ -164,6 +164,13 @@ public:
     QnRtcProducer* producer;
 };
 
+class QnPubStream
+{
+public:
+    bool enable;
+    QnRtcConsumer* consumer;
+};
+
 /*************************************************************
  | total size(4bytes) | json size(4bytes) | json | raw data | 
 **************************************************************/
@@ -179,14 +186,16 @@ public:
     
     // consumer用于导出媒体流
     srs_error_t AddConsumer(QnRtcConsumer* consumer);
+    void StartPublish(const std::string& stream_url);
+    void StopPublish(const std::string& stream_url);
 
     srs_error_t OnRtcData(const QnRtcData_SharePtr& rtc_data);
 
     virtual srs_error_t cycle();
 
 private:
-    void StartSubscribe(const std::string stream_url);
-    void StopSubscibe(const std::string stream_url);
+    void StartSubscribe(const std::string& stream_url);
+    void StopSubscibe(const std::string& stream_url);
 
 private:
     QnRtcManager();
@@ -203,7 +212,7 @@ private:
     uint64_t recv_unique_id_;
     srs_cond_t consumer_data_cond_;
     std::vector<QnRtcData_SharePtr> vec_consumer_data_;
-    std::map<std::string, QnRtcConsumer*> map_consumers_;
+    std::map<std::string, QnPubStream*> map_pub_streams_;
     std::map<std::string, QnReqStream*> map_req_streams_;
 };
 
@@ -373,7 +382,7 @@ private:
 
 private:
     bool started_;
-    bool quit_;
+    bool wait_quit_;
     uint64_t session_;
     int64_t tick_start_;
     bool first_send_cb_;
