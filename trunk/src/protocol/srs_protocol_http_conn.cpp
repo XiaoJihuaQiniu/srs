@@ -520,6 +520,12 @@ string SrsHttpMessage::path()
     return _uri->get_path();
 }
 
+// mb20230308
+void SrsHttpMessage::set_path(const std::string& path)
+{
+    _uri->set_path(path);
+}
+
 string SrsHttpMessage::query()
 {
     return _uri->get_query();

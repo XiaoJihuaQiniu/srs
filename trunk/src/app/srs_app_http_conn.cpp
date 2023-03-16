@@ -167,6 +167,8 @@ srs_error_t SrsHttpConn::do_cycle()
     return err;
 }
 
+std::string qn_get_play_stream(const std::string& stream);
+
 srs_error_t SrsHttpConn::process_requests(SrsRequest** preq)
 {
     srs_error_t err = srs_success;
@@ -191,9 +193,22 @@ srs_error_t SrsHttpConn::process_requests(SrsRequest** preq)
         SrsHttpMessage* hreq = (SrsHttpMessage*)req;
         hreq->set_connection(this);
 
-        // mb20230308
-        // TODO 这里的path会是 /live/livestream.m3u8 或者 /live/livestream.flv 考虑在这里从源头改掉
+        // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+        // 最好是判断下发布的stream名字，不能包含这个后缀
+        // 这里的path会是 /live/livestream.m3u8 或者 /live/livestream.flv 考虑在这里从源头改掉
         srs_trace("++++ request host:%s, path:%s", hreq->host().c_str(), hreq->path().c_str());
+        std::string::size_type pos;
+        if ((pos = hreq->path().find(".flv")) != std::string::npos) {
+            std::string path_new = hreq->path().substr(0, pos);
+            path_new = qn_get_play_stream(path_new);
+            path_new += ".flv";
+            hreq->set_path(path_new);
+        } else if ((pos = hreq->path().find(".m3u8")) != std::string::npos) {
+            std::string path_new = hreq->path().substr(0, pos);
+            path_new = qn_get_play_stream(path_new);
+            path_new += ".m3u8";
+            hreq->set_path(path_new);
+        }
 
         // copy request to last request object.
         srs_freep(*preq);

@@ -29,6 +29,11 @@ const std::string PLAY_STREAM_TAG = "--qnplaystream";
 // 最好是判断下发布的stream名字，不能包含这个后缀
 std::string qn_get_play_stream(const std::string& stream)
 {
+    std::string::size_type pos;
+    if ((pos = stream.find(PLAY_STREAM_TAG)) != std::string::npos) {
+        return std::string(stream);
+    }
+
     return stream + PLAY_STREAM_TAG;
 }
 
@@ -36,7 +41,7 @@ std::string qn_get_origin_stream(const std::string& stream)
 {
     std::string::size_type pos;
     if ((pos = stream.find(PLAY_STREAM_TAG)) == std::string::npos) {
-        return stream;
+        return std::string(stream);
     }
 
     return stream.substr(0, pos);
@@ -993,17 +998,17 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
 
     std::string stream_url;
     json_do_default(stream_url, js["stream_url"], "^&unknow");
-    // stream_url = qn_get_play_stream(stream_url);
+    stream_url = qn_get_play_stream(stream_url);
 
     auto it = map_req_streams_.find(stream_url);
     if (it == map_req_streams_.end()) {
-        srs_error("request for stream %s not found", stream_url.c_str());
+        // srs_error("request for stream %s not found", stream_url.c_str());
         return err;
     }
 
     QnReqStream* req_stream = it->second;
     if (!req_stream->enable) {
-        srs_error("request for stream %s not enable", stream_url.c_str());
+        // srs_error("request for stream %s not enable", stream_url.c_str());
         return err;
     }
 
@@ -1028,6 +1033,7 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
 
 srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
 {
+    srs_trace("new SrsRtmpFromRtcBridge for %s start", req->get_stream_url().c_str());
     producer = NULL;
     srs_error_t err = srs_success;
     SrsRtcSource* source = NULL;
@@ -1044,7 +1050,7 @@ srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
     // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
     // especially for stream merging.
     // TODO
-    rtmp->set_cache(false);
+    rtmp->set_cache(true);
 
     SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
     if ((err = bridge->initialize(req)) != srs_success) {
@@ -1053,9 +1059,9 @@ srs_error_t QnRtcManager::NewProducer(SrsRequest* req, QnRtcProducer* &producer)
     }
 
     source->set_bridge(bridge);
-
     producer = new QnRtcProducer(source);
 
+    srs_trace("new SrsRtmpFromRtcBridge for %s succ...", req->get_stream_url().c_str());
     return srs_success;
 }
 

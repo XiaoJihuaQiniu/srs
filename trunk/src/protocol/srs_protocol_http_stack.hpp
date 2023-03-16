@@ -598,6 +598,8 @@ public:
     virtual std::string get_host();
     virtual int get_port();
     virtual std::string get_path();
+    // mb20230308
+    virtual void set_path(const std::string& path);
     virtual std::string get_query();
     virtual std::string get_query_by_key(std::string key);
     virtual std::string get_fragment();

@@ -2696,6 +2696,7 @@ void SrsLiveSource::on_unpublish()
 
 srs_error_t SrsLiveSource::create_consumer(SrsLiveConsumer*& consumer)
 {
+    srs_trace("create consumer for %s", req->get_stream_url().c_str());
     srs_error_t err = srs_success;
 
     // mb20230308
@@ -2769,6 +2770,8 @@ srs_error_t SrsLiveSource::consumer_dumps(SrsLiveConsumer* consumer, bool ds, bo
 
 void SrsLiveSource::on_consumer_destroy(SrsLiveConsumer* consumer)
 {
+    srs_trace("destroy consumer for %s", req->get_stream_url().c_str());
+
     std::vector<SrsLiveConsumer*>::iterator it;
     it = std::find(consumers.begin(), consumers.end(), consumer);
     if (it != consumers.end()) {
