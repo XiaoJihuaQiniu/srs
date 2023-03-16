@@ -67,6 +67,8 @@ enum EmRtcDataType
     en_RtcDataType_UnPublishStream,     // 停止发布数据流
     en_RtcDataType_RequestStream,       // 请求数据流
     en_RtcDataType_StopStream,          // 停止请求数据流
+    en_RtcDataType_PublishStreamPlay,
+    en_RtcDataType_UnPublishStreamPlay,
 
     en_RtcDataType_butt
 };
@@ -758,9 +760,9 @@ srs_error_t QnRtcProducer::on_timer(srs_utime_t interval)
 // mb20230308
 QnRtcManager::QnRtcManager()
 {
-    auto recv_callback = [&](const std::string& flag, const QnDataPacket_SharePtr& packet) {
+    auto recv_callback = [&](const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet) {
         // srs_trace("recv data from %s, size:%u\n", flag.c_str(), packet->Size());
-        OnProducerData(packet);
+        OnProducerData(stream_url, type, packet);
     };
 
     send_unique_id_ = 1;
@@ -802,13 +804,13 @@ srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
             users.push_back(user);
             srs_trace("user inserted, user:%p, left users:%d\n", user, users.size());
             if (!req_stream->enable) {
-                srs_assert(req_stream->producer);
-                if (req_stream->producer) {
-                    req_stream->producer->on_publish();
-                }
+                // srs_assert(req_stream->producer);
+                // if (req_stream->producer) {
+                //     req_stream->producer->on_publish();
+                // }
                 req_stream->enable = true;
-                StartSubscribe(stream_url);
             }
+            StartSubscribe(stream_url);
         }
         
         return err;
@@ -827,7 +829,8 @@ srs_error_t QnRtcManager::RequestStream(SrsRequest* req, void* user)
         // return err;
     }
 
-    req_stream->producer->on_publish();
+    // req_stream->producer->on_publish();
+    req_stream->published = false;
     req_stream->enable = true;
     StartSubscribe(stream_url);
 
@@ -842,7 +845,6 @@ srs_error_t QnRtcManager::StopRequestStream(SrsRequest* req, void* user)
     if (it == map_req_streams_.end()) {
         srs_error("request stream %s not exist, error\n", stream_url.c_str());
     } else {
-        // todo
         srs_trace("stop request stream %s by user:%p\n", stream_url.c_str(), user);
         QnReqStream* req_stream = it->second;
         std::vector<void*>& users = req_stream->users;
@@ -854,10 +856,10 @@ srs_error_t QnRtcManager::StopRequestStream(SrsRequest* req, void* user)
             srs_trace("user removed, user:%p, left users:%d\n", user, users.size());
             if (users.empty()) {
                 req_stream->enable = false;
-                if (req_stream->producer){
-                    req_stream->producer->on_unpublish();
-                    StopSubscibe(stream_url);
-                }
+                StopSubscibe(stream_url);
+                // if (req_stream->producer){
+                //     req_stream->producer->on_unpublish();
+                // }
             }
         }
     }
@@ -1004,9 +1006,48 @@ srs_error_t QnRtcManager::cycle()
     return err;
 }
 
-srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
+srs_error_t QnRtcManager::OnProducerData(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet)
 {
     srs_error_t err = srs_success;
+
+    auto it = map_req_streams_.find(stream_url);
+    if (it == map_req_streams_.end()) {
+        // srs_error("request for stream %s not found", stream_url.c_str());
+        return err;
+    }
+
+    QnReqStream* req_stream = it->second;
+
+    if (!req_stream->producer) {
+        srs_warn("producer not exist, stream:%s\n", stream_url.c_str());
+        return err;
+    }
+
+    if (type == en_RtcDataType_UnPublishStreamPlay) { 
+        if (req_stream->published) {
+            req_stream->producer->on_unpublish();
+            req_stream->published = false;
+        }
+        return err;
+    }
+
+    if (!req_stream->enable) {
+        // srs_error("request for stream %s not enable", stream_url.c_str());
+        return err;
+    }
+
+    if (type == en_RtcDataType_PublishStreamPlay) {
+        if (!req_stream->published) {
+            req_stream->producer->on_publish();
+            req_stream->published = true;
+        }
+        return err;
+    }
+
+    if (!req_stream->published) {
+        req_stream->producer->on_publish();
+        req_stream->published = true;
+    }
 
     // big endian
     uint8_t* data = (uint8_t*)packet->Data();
@@ -1021,31 +1062,13 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     // srs_trace("recv js:%s\n", head.c_str());
     js = json::parse(head);
 
-    if (!json_have(js, "stream_url")) {
-        srs_error("producer data no unique_id or stream_url, error");
-        return err;
-    }
-
-    std::string stream_url;
-    json_do_default(stream_url, js["stream_url"], "^&unknow");
-    stream_url = qn_get_play_stream(stream_url);
-
-    auto it = map_req_streams_.find(stream_url);
-    if (it == map_req_streams_.end()) {
-        // srs_error("request for stream %s not found", stream_url.c_str());
-        return err;
-    }
-
-    QnReqStream* req_stream = it->second;
-    if (!req_stream->enable) {
-        // srs_error("request for stream %s not enable", stream_url.c_str());
-        return err;
-    }
-
-    if (!req_stream->producer) {
-        srs_warn("producer not exist, stream:%s\n", stream_url.c_str());
-        return err;
-    }
+    // if (!json_have(js, "stream_url")) {
+    //     srs_error("producer data no unique_id or stream_url, error");
+    //     return err;
+    // }
+    // std::string stream_url;
+    // json_do_default(stream_url, js["stream_url"], "^&unknow");
+    // stream_url = qn_get_play_stream(stream_url);
 
     char* payload = (char*)data + JSON_IN_HEAD_SIZE + js_size;
     uint32_t payload_size = total_size - js_size - JSON_IN_HEAD_SIZE;
@@ -1100,8 +1123,8 @@ srs_error_t QnRtcManager::on_timer(srs_utime_t interval)
     srs_trace2("QNDUMP", "<== request streams:%u", map_req_streams_.size());
     for (auto it = map_req_streams_.begin(); it != map_req_streams_.end(); it++) {
         QnReqStream* req_stream = it->second;
-        srs_trace2("QNDUMP", "[ %s, enable:%d, needs:%d ]", qn_get_origin_stream(it->first).c_str(), 
-                    req_stream->enable, req_stream->users.size());
+        srs_trace2("QNDUMP", "[ %s, published:%d, enable:%d, needs:%d ]", qn_get_origin_stream(it->first).c_str(), 
+                    req_stream->published, req_stream->enable, req_stream->users.size());
         if (req_stream->producer) {
             req_stream->producer->Dump();
         }
@@ -1191,7 +1214,14 @@ uint32_t QnLoopTransport::GetResverdSize()
 srs_error_t QnLoopTransport::Send(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet)
 {
     // srs_trace("LoopTransport send %u bytes\n", packet->Size());
-    vec_packets_.push_back(packet);
+    TransMsg* msg = new TransMsg;
+    srs_assert(msg);
+
+    msg->stream_url = stream_url;
+    msg->type = type;
+    msg->packet = packet;
+
+    vec_packets_.push_back(msg);
     srs_cond_signal(packet_cond_);
     return srs_success;
 }
@@ -1216,12 +1246,14 @@ srs_error_t QnLoopTransport::cycle()
             continue;
         }
 
-        QnDataPacket_SharePtr packet = *it;
+        TransMsg* msg = *it;
         vec_packets_.erase(it);
 
         if (recv_callback_) {
-            recv_callback_(name_, packet);
+            recv_callback_(msg->stream_url, msg->type, msg->packet);
         }
+
+        delete msg;
     }
 
     srs_trace("QnLoopTransport thread quit... \n");
@@ -1234,7 +1266,8 @@ srs_error_t QnLoopTransport::cycle()
 QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback) :
                                                 QnTransport(name, callback)
 {
-    max_buf_size_ = 2048;
+    pthread_mutex_init(&wt_mutex_, NULL);
+
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, fds_) < 0) {
         srs_error("error %d on socketpair\n", errno);
     }
@@ -1311,11 +1344,10 @@ srs_error_t QnSocketPairTransport::cycle()
         }
 
         srs_assert(msg);
-        srs_assert(msg->type == en_RtcDataType_Media);
+        // srs_assert(msg->type == en_RtcDataType_Media);
 
         if (recv_callback_) {
-            QnDataPacket_SharePtr packet = msg->packet;
-            recv_callback_(name_, packet);
+            recv_callback_(msg->stream_url, msg->type, msg->packet);
         }
 
         delete msg;
@@ -1424,7 +1456,9 @@ void QnSocketPairTransport::deal_request_msg(TransMsg* msg)
                 srs_error("stream %s not exist\n", flag.c_str());
                 delete msg;
             } else {
+                pthread_mutex_lock(&wt_mutex_);
                 write(fds_[1], &msg, sizeof(msg));
+                pthread_mutex_unlock(&wt_mutex_);
             }
         };
 
@@ -1481,6 +1515,7 @@ srs_error_t HttpStreamSender::Start()
     auto f = [&]() {
         SendProc();
         wait_quit_ = false;
+        started_ = false;
     };
 
     wait_quit_ = false;
@@ -1707,6 +1742,7 @@ srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
         RecvProc();
         wait_quit_ = false;
         started_ = false;
+        StopPublish();
     };
 
     wait_quit_ = false;
@@ -1822,6 +1858,18 @@ size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nm
     }
 
     return buffer_size;
+}
+
+void HttpStreamReceiver::StopPublish()
+{
+    if (recv_callback_) {
+        srs_trace("stop publish play stream %s", stream_url_.c_str());
+        TransMsg* msg = new TransMsg;
+        srs_assert(msg);
+        msg->stream_url = stream_url_;
+        msg->type = en_RtcDataType_UnPublishStreamPlay;
+        recv_callback_(stream_url_, msg);
+    }
 }
 
 void HttpStreamReceiver::RecvProc()

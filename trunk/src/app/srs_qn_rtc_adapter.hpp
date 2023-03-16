@@ -155,11 +155,11 @@ private:
 };
 
 
-// mb20230308
 class QnReqStream
 {
 public:
     bool enable;
+    bool published;
     std::vector<void*> users;
     QnRtcProducer* producer;
 };
@@ -169,6 +169,14 @@ class QnPubStream
 public:
     bool enable;
     QnRtcConsumer* consumer;
+};
+
+class TransMsg
+{
+public:
+    std::string stream_url;
+    int32_t type;
+    QnDataPacket_SharePtr packet;
 };
 
 /*************************************************************
@@ -202,7 +210,7 @@ private:
     virtual ~QnRtcManager();
 
     srs_error_t NewProducer(SrsRequest* req, QnRtcProducer* &producer);
-    srs_error_t OnProducerData(const QnDataPacket_SharePtr& packet);
+    srs_error_t OnProducerData(const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet);
     srs_error_t on_timer(srs_utime_t interval);
 
 private:
@@ -217,7 +225,7 @@ private:
 };
 
 
-typedef std::function<void (const std::string& flag, const QnDataPacket_SharePtr& packet)> TransRecvCbType;
+typedef std::function<void (const std::string& flag, int32_t type, const QnDataPacket_SharePtr& packet)> TransRecvCbType;
 
 class QnTransport
 {
@@ -250,7 +258,7 @@ private:
 private:
     SrsCoroutine* trd_;
     srs_cond_t packet_cond_;
-    std::vector<QnDataPacket_SharePtr> vec_packets_;
+    std::vector<TransMsg*> vec_packets_;
 };
 
 
@@ -258,14 +266,6 @@ private:
 
 class StreamSender;
 class StreamReceiver;
-
-class TransMsg
-{
-public:
-    std::string stream_url;
-    int32_t type;
-    QnDataPacket_SharePtr packet;
-};
 
 class QnSocketPairTransport : public QnTransport, public ISrsCoroutineHandler
 {
@@ -287,7 +287,8 @@ private:
     srs_netfd_t rwfd_;
     SrsCoroutine* trd_;
     srs_cond_t packet_cond_;
-    size_t max_buf_size_;
+
+    pthread_mutex_t wt_mutex_;
     std::thread* trans_thread_;
     
     std::string gate_server_;
@@ -378,6 +379,7 @@ public:
     size_t RecvMoreCallback(char *dest, size_t size, size_t nmemb);
 
 private:
+    void StopPublish();
     void RecvProc();
 
 private:
