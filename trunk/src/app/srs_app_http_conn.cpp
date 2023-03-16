@@ -191,6 +191,10 @@ srs_error_t SrsHttpConn::process_requests(SrsRequest** preq)
         SrsHttpMessage* hreq = (SrsHttpMessage*)req;
         hreq->set_connection(this);
 
+        // mb20230308
+        // TODO 这里的path会是 /live/livestream.m3u8 或者 /live/livestream.flv 考虑在这里从源头改掉
+        srs_trace("++++ request host:%s, path:%s", hreq->host().c_str(), hreq->path().c_str());
+
         // copy request to last request object.
         srs_freep(*preq);
         *preq = hreq->to_request(hreq->host());

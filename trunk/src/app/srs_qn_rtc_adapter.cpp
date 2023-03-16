@@ -74,20 +74,40 @@ const std::string PAYLOAD_TYPE = "pt";
 const std::string MARK_BIT = "mark";
 const std::string KEY_FRAME = "key";
 
-const uint32_t DATA_HEAD_SIZE = 8;
+//| total size(4bytes) | json size(4bytes) | data |
+const uint32_t JSON_IN_HEAD_SIZE = 8;
 
+//| total size(4bytes) | data |
+const uint32_t DATA_ONLY_HEAD_SIZE = 4;
+
+static void WriteUint32BE(uint8_t* data, uint32_t value)
+{
+    data[0] = ((value >> 24) & 0xff);
+    data[1] = ((value >> 16) & 0xff);
+    data[2] = ((value >> 8) & 0xff);
+    data[3] = (value & 0xff);
+}
+
+static uint32_t ReadUint32BE(uint8_t* data)
+{
+    uint32_t value = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
+    return value;
+}
+
+
+// 带json的转为不带json的
 uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
 {
     // 发送格式只能是4字节的长度 + rtp包，把json格式的数据写入rtp扩展
     // big endian
     uint8_t* data = (uint8_t*)packet->Data();
 
-    uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-    uint16_t js_size = (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | data[7];
+    uint32_t total_size = ReadUint32BE(data);
+    uint32_t js_size = ReadUint32BE(data + 4);
     srs_assert(total_size == packet->Size());
 
     json js;
-    std::string head((char*)data + DATA_HEAD_SIZE, js_size);
+    std::string head((char*)data + JSON_IN_HEAD_SIZE, js_size);
     js = json::parse(head);
 
     std::string source_id;
@@ -102,8 +122,8 @@ uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
     int64_t astime;
     json_do_default(astime, js[ASTIME], 0);
 
-    uint32_t rtp_size = total_size - DATA_HEAD_SIZE - js_size;
-    uint8_t* rtp_data = data + DATA_HEAD_SIZE + js_size;
+    uint32_t rtp_size = total_size - JSON_IN_HEAD_SIZE - js_size;
+    uint8_t* rtp_data = data + JSON_IN_HEAD_SIZE + js_size;
 
     // 找到扩展头的位置
     int16_t ext_size = 0;
@@ -150,12 +170,12 @@ uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
         payload_addr += (4 + ext_size);
     }
 
-    uint32_t new_total_size = DATA_HEAD_SIZE + size_to_cc + 4 + new_ext_size + payload_size;
+    uint32_t new_total_size = DATA_ONLY_HEAD_SIZE + size_to_cc + 4 + new_ext_size + payload_size;
 
     uint8_t* data_new = new uint8_t[new_total_size];
     srs_assert(data_new);
 
-    uint8_t* data_write = data_new + DATA_HEAD_SIZE;
+    uint8_t* data_write = data_new + DATA_ONLY_HEAD_SIZE;
     memcpy(data_write, rtp_data, size_to_cc);
     data_write[0] |= 0x10;      // 有扩展头标识
     data_write += size_to_cc;
@@ -177,7 +197,7 @@ uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
     memcpy(data_write, source_id.c_str(), source_id.size());
     data_write += source_id.size();
 
-    data_write[0] = 0xd0 | (sizeof(unique_id) - 1);     // 扩展类型13
+    data_write[0] = 0x10 | (sizeof(unique_id) - 1);     // 扩展类型13
     data_write++;
     *(uint64_t*)data_write = unique_id;
     data_write += sizeof(unique_id);
@@ -196,26 +216,24 @@ uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
         memset(data_write, 0, new_pad_count);
     }
 
-    data_write = data_new + DATA_HEAD_SIZE + size_to_cc + 4 + new_ext_size;
+    data_write = data_new + DATA_ONLY_HEAD_SIZE + size_to_cc + 4 + new_ext_size;
     memcpy(data_write, payload_addr, payload_size);
 
     // write total_size
-    data_new[0] = ((new_total_size >> 24) & 0xff);
-    data_new[1] = ((new_total_size >> 16) & 0xff);
-    data_new[2] = ((new_total_size >> 8) & 0xff);
-    data_new[3] = (new_total_size & 0xff);
+    WriteUint32BE(data_new, new_total_size);
 
     size = new_total_size;
     return data_new;
 }
 
+// 不带json的转为带json的
 QnDataPacket_SharePtr MsgFromRtpExt(const std::string& stream_url, uint8_t* rdt, size_t size)
 {
     uint32_t total_size_old = (rdt[0] << 24) | (rdt[1] << 16) | (rdt[2] << 8) | rdt[3];
     srs_assert(total_size_old == size);
 
-    uint32_t rtp_size = total_size_old - DATA_HEAD_SIZE;
-    uint8_t* rtp_data = rdt + DATA_HEAD_SIZE;
+    uint32_t rtp_size = total_size_old - DATA_ONLY_HEAD_SIZE;
+    uint8_t* rtp_data = rdt + DATA_ONLY_HEAD_SIZE;
 
     json js;
     js["stream_url"] = stream_url;
@@ -252,7 +270,7 @@ QnDataPacket_SharePtr MsgFromRtpExt(const std::string& stream_url, uint8_t* rdt,
                 astime = *(int64_t*)(p + 1);
                 js[ASTIME] = astime;
                 // srs_trace("astime:%lld", astime);
-            } else if (t == 0xd0) {
+            } else if (t == 0x10) {
                 unique_id = *(uint64_t*)(p + 1);
                 js[PACKET_ID] = unique_id;
                 // srs_trace("unique_id:%llu", unique_id);
@@ -271,38 +289,31 @@ QnDataPacket_SharePtr MsgFromRtpExt(const std::string& stream_url, uint8_t* rdt,
 
     std::string head = js.dump();
     // srs_trace("send js:%s\n", head.c_str());
-    uint16_t js_size = static_cast<uint16_t>(head.size());
+    uint32_t js_size = head.size();
     // 前面8字节固定，不能改动
     /*************************************************************
      | total size(4bytes) | json size(4bytes) | json | raw data | 
     **************************************************************/
-    uint32_t total_size = DATA_HEAD_SIZE + js_size + rtp_size;
+    uint32_t total_size = JSON_IN_HEAD_SIZE + js_size + rtp_size;
     QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
 
     // big endian
     uint8_t* data = (uint8_t*)packet->Data();
 
     // write total_size
-    data[0] = ((total_size >> 24) & 0xff);
-    data[1] = ((total_size >> 16) & 0xff);
-    data[2] = ((total_size >> 8) & 0xff);
-    data[3] = (total_size & 0xff);
+    WriteUint32BE(data, total_size);
 
     // json size
-    data[4] = ((js_size >> 24) & 0xff);
-    data[5] = ((js_size >> 16) & 0xff);
-    data[6] = ((js_size >> 8) & 0xff);
-    data[7] = (js_size & 0xff);
+    WriteUint32BE(data + 4, js_size);
     
     // json data
-    memcpy(data + DATA_HEAD_SIZE, head.c_str(), js_size);
+    memcpy(data + JSON_IN_HEAD_SIZE, head.c_str(), js_size);
 
     // raw payload data
-    memcpy(data + DATA_HEAD_SIZE + js_size, rtp_data, rtp_size);
+    memcpy(data + JSON_IN_HEAD_SIZE + js_size, rtp_data, rtp_size);
 
     return packet;
 }
-
 
 
 QnDataPacket::QnDataPacket(uint32_t size)
@@ -926,34 +937,28 @@ srs_error_t QnRtcManager::cycle()
 
         std::string head = js.dump();
         // srs_trace("send js:%s\n", head.c_str());
-        uint16_t js_size = static_cast<uint16_t>(head.size());
+        uint32_t js_size = head.size();
         // 前面8字节固定，不能改动
         /*************************************************************
          | total size(4bytes) | json size(4bytes) | json | raw data | 
         **************************************************************/
-        uint32_t total_size = DATA_HEAD_SIZE + js_size + rtc_data->Payload()->Size();
+        uint32_t total_size = JSON_IN_HEAD_SIZE + js_size + rtc_data->Payload()->Size();
         QnDataPacket_SharePtr packet = std::make_shared<QnDataPacket>(total_size);
 
         // big endian
         uint8_t* data = (uint8_t*)packet->Data();
 
         // write total_size
-        data[0] = ((total_size >> 24) & 0xff);
-        data[1] = ((total_size >> 16) & 0xff);
-        data[2] = ((total_size >> 8) & 0xff);
-        data[3] = (total_size & 0xff);
+        WriteUint32BE(data, total_size);
 
         // json size
-        data[4] = ((js_size >> 24) & 0xff);
-        data[5] = ((js_size >> 16) & 0xff);
-        data[6] = ((js_size >> 8) & 0xff);
-        data[7] = (js_size & 0xff);
+        WriteUint32BE(data + 4, js_size);
         
         // json data
-        memcpy(data + DATA_HEAD_SIZE, head.c_str(), js_size);
+        memcpy(data + JSON_IN_HEAD_SIZE, head.c_str(), js_size);
 
         // raw payload data
-        memcpy(data + DATA_HEAD_SIZE + js_size, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
+        memcpy(data + JSON_IN_HEAD_SIZE + js_size, rtc_data->Payload()->Data(), rtc_data->Payload()->Size());
 
         if (transport_) {
             transport_->Send(rtc_data->StreamUrl(), rtc_data->Type(), packet);
@@ -971,13 +976,13 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
     // big endian
     uint8_t* data = (uint8_t*)packet->Data();
 
-    uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-    uint16_t js_size = (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | data[7];
+    uint32_t total_size = ReadUint32BE(data);
+    uint32_t js_size = ReadUint32BE(data + 4);
 
     QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
 
     json& js = rtc_data->Head();
-    std::string head((char*)data + DATA_HEAD_SIZE, js_size);
+    std::string head((char*)data + JSON_IN_HEAD_SIZE, js_size);
     // srs_trace("recv js:%s\n", head.c_str());
     js = json::parse(head);
 
@@ -988,15 +993,17 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
 
     std::string stream_url;
     json_do_default(stream_url, js["stream_url"], "^&unknow");
-    stream_url = qn_get_play_stream(stream_url);
+    // stream_url = qn_get_play_stream(stream_url);
 
     auto it = map_req_streams_.find(stream_url);
     if (it == map_req_streams_.end()) {
+        srs_error("request for stream %s not found", stream_url.c_str());
         return err;
     }
 
     QnReqStream* req_stream = it->second;
     if (!req_stream->enable) {
+        srs_error("request for stream %s not enable", stream_url.c_str());
         return err;
     }
 
@@ -1005,8 +1012,8 @@ srs_error_t QnRtcManager::OnProducerData(const QnDataPacket_SharePtr& packet)
         return err;
     }
 
-    char* payload = (char*)data + DATA_HEAD_SIZE + js_size;
-    uint32_t payload_size = total_size - js_size - DATA_HEAD_SIZE;
+    char* payload = (char*)data + JSON_IN_HEAD_SIZE + js_size;
+    uint32_t payload_size = total_size - js_size - JSON_IN_HEAD_SIZE;
     QnDataPacket_SharePtr payload_packet = std::make_shared<QnDataPacket>(payload_size);
     memcpy(payload_packet->Data(), payload, payload_size);
     // srs_trace("total_size:%u, jsoffset:%u, jssize:%d, payload size:%u\n", total_size, js_offset, js_size, payload_size);
@@ -1461,6 +1468,7 @@ srs_error_t HttpStreamSender::Send(TransMsg* msg)
     srs_error_t err = srs_success;
     if (!started_) {
         delete msg;
+        return err;
     }
 
     if (msg->type != en_RtcDataType_Media) {
@@ -1512,6 +1520,10 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
 
         last_data_ = Msg2RtpExt(msg->packet, last_data_size_);
         last_data_offset_ = 0;
+
+        // 注意：服务器的格式要求，前4字节的total_size不包括前4个字节本身
+        WriteUint32BE(last_data_, last_data_size_ - 4);
+
         delete msg;
     }
 
@@ -1669,7 +1681,12 @@ size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nm
     }
 
     size_t buffer_size = size * nmemb;
-    srs_trace("RecvMoreCallback, buffer:%p, size:%u", buffer, size);
+
+    // uint8_t* data = (uint8_t*)buffer;
+    // // 前4个字节总大小
+    // uint32_t total_size = ReadUint32BE(data);
+    // srs_assert(total_size > 4);
+    // srs_trace("RecvMoreCallback, buffer:%p, size:%u, %u", buffer, buffer_size, total_size);
 
     char* data_read = buffer;
     size_t size_left = buffer_size;
@@ -1677,14 +1694,24 @@ size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nm
     while (size_left > 0) {
 
         if (!buf_write_) {
+            srs_assert(size_left >= 4);
             uint8_t* data = (uint8_t*)data_read;
             // 前4个字节总大小
-            uint32_t total_size = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
-            srs_assert(total_size > 4);
+            // 注意：服务器的格式要求，total_size不包括前4个字节本身
+            uint32_t total_size = ReadUint32BE(data);
+            total_size += 4;
             buf_write_ = new char[total_size];
             srs_assert(buf_write_);
+
+            // 写入总数据大小
+            WriteUint32BE((uint8_t*)buf_write_, total_size);
+
             data_size_ = total_size;
-            buf_offset_ = 0;
+            buf_offset_ = 4;
+
+            data_read += 4;
+            size_left -= 4;
+            continue;
         }
 
         uint32_t size_need = data_size_ - buf_offset_;
