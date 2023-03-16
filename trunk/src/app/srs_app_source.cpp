@@ -2241,8 +2241,12 @@ srs_error_t SrsLiveSource::on_meta_data(SrsCommonMessage* msg, SrsOnMetaDataPack
         }
     }
     
-    // Copy to hub to all utilities.
-    return hub->on_meta_data(meta->data(), metadata);
+    if (qn_is_play_stream2(req)) {
+        // Copy to hub to all utilities.
+        return hub->on_meta_data(meta->data(), metadata);
+    }
+
+    return err;
 }
 
 srs_error_t SrsLiveSource::on_audio(SrsCommonMessage* shared_audio)
@@ -2318,9 +2322,11 @@ srs_error_t SrsLiveSource::on_audio_imp(SrsSharedPtrMessage* msg)
         }
     }
     
-    // Copy to hub to all utilities.
-    if ((err = hub->on_audio(msg)) != srs_success) {
-        return srs_error_wrap(err, "consume audio");
+    if (qn_is_play_stream2(req)) {
+        // Copy to hub to all utilities.
+        if ((err = hub->on_audio(msg)) != srs_success) {
+            return srs_error_wrap(err, "consume audio");
+        }
     }
 
     // For bridge to consume the message.
@@ -2463,9 +2469,11 @@ srs_error_t SrsLiveSource::on_video_imp(SrsSharedPtrMessage* msg)
         return srs_error_wrap(err, "meta update video");
     }
     
-    // Copy to hub to all utilities.
-    if ((err = hub->on_video(msg, is_sequence_header)) != srs_success) {
-        return srs_error_wrap(err, "hub consume video");
+    if (qn_is_play_stream2(req)) {
+        // Copy to hub to all utilities.
+        if ((err = hub->on_video(msg, is_sequence_header)) != srs_success) {
+            return srs_error_wrap(err, "hub consume video");
+        }
     }
 
     // For bridge to consume the message.
@@ -2622,9 +2630,11 @@ srs_error_t SrsLiveSource::on_publish()
     is_monotonically_increase = true;
     last_packet_time = 0;
     
-    // Notify the hub about the publish event.
-    if ((err = hub->on_publish()) != srs_success) {
-        return srs_error_wrap(err, "hub publish");
+    if (qn_is_play_stream2(req)) {
+        // Notify the hub about the publish event.
+        if ((err = hub->on_publish()) != srs_success) {
+            return srs_error_wrap(err, "hub publish");
+        }
     }
     
     // notify the handler.
@@ -2655,8 +2665,10 @@ void SrsLiveSource::on_unpublish()
         return;
     }
     
-    // Notify the hub about the unpublish event.
-    hub->on_unpublish();
+    if (qn_is_play_stream2(req)) {
+        // Notify the hub about the unpublish event.
+        hub->on_unpublish();
+    }
     
     // only clear the gop cache,
     // donot clear the sequence header, for it maybe not changed,

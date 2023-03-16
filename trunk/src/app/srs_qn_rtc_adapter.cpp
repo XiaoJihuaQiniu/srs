@@ -22,8 +22,7 @@
 } while(0)
 
 
-//const std::string PLAY_STREAM_TAG = "^#@qnplaystream$#@";
-const std::string PLAY_STREAM_TAG = "--qnplaystream";
+const std::string PLAY_STREAM_TAG = "--qnplaystream11";
 
 // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
 // 最好是判断下发布的stream名字，不能包含这个后缀
@@ -349,10 +348,12 @@ QnDataPacket::QnDataPacket(char* data, uint32_t size, void(*pfree)(char*, uint32
 
 QnDataPacket::~QnDataPacket()
 {
-    if (!pfree_) {
-        delete[] data_;
-    } else {
-        pfree_(data_, size_);
+    if (data_) {
+        if (!pfree_) {
+            delete[] data_;
+        } else {
+            pfree_(data_, size_);
+        }
     }
     
     data_ = NULL;
