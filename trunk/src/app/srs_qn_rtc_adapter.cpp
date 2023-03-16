@@ -1461,7 +1461,7 @@ HttpStreamSender::HttpStreamSender(const std::string gate_server, const std::str
     last_data_ = NULL;
     last_data_size_ = 0;
     last_data_offset_ = 0;
-    session_ = (uint64_t)srs_update_system_time();
+    // session_ = (uint64_t)srs_update_system_time();
 }
 
 HttpStreamSender::~HttpStreamSender()
@@ -1594,7 +1594,7 @@ void HttpStreamSender::SendProc()
 {
     srs_trace("thread for stream sender start, %s", stream_url_.c_str());
 
-    // session_ = (uint64_t)srs_update_system_time();
+    session_ = (uint64_t)srs_update_system_time();
     tick_start_ = 0;
 
     for (;;) {
@@ -1681,6 +1681,7 @@ HttpStreamReceiver::HttpStreamReceiver(const std::string gate_server, const std:
     pthread_mutex_init(&mutex_, NULL);
     started_ = false;
     wait_quit_ = false;
+    curl_ = NULL;
     thread_ = NULL;
 
     buf_write_ = NULL;
@@ -1705,6 +1706,7 @@ srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
     auto f = [&]() {
         RecvProc();
         wait_quit_ = false;
+        started_ = false;
     };
 
     wait_quit_ = false;
@@ -1720,8 +1722,23 @@ srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
 void HttpStreamReceiver::Stop()
 {
     srs_trace("stop stream receiver, %s\n", stream_url_.c_str());
-    wait_quit_ = true;
-    started_ = false;
+    if (started_) {
+        wait_quit_ = true;
+        started_ = false;
+        // close socket
+        // https://stackoverflow.com/questions/28767613/cancel-curl-easy-perform-while-it-is-trying-to-connect
+        // if (curl_) {
+        //     curl_socket_t sockfd;
+        //     //发现不起作用，返回的sockfd为-1
+        //     auto res = curl_easy_getinfo(curl_, CURLINFO_ACTIVESOCKET, &sockfd);
+        //     if(res != CURLE_OK) {
+        //         srs_error("Error: %s\n", curl_easy_strerror(res));
+        //     } else {
+        //         srs_trace("close socket fd(%d) to terminate curl_easy_perform", sockfd);
+        //         close(sockfd);
+        //     }
+        // }
+    }
 }
 
 static size_t StreamReceiverReadCallback(char *dest, size_t size, size_t nmemb, void *userp)
@@ -1731,6 +1748,8 @@ static size_t StreamReceiverReadCallback(char *dest, size_t size, size_t nmemb, 
 
 size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nmemb)
 {
+    try_count_ = 0;
+
     if (first_send_cb_) {
         first_send_cb_ = false;
         srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
@@ -1811,10 +1830,15 @@ void HttpStreamReceiver::RecvProc()
 
     session_ = (uint64_t)srs_update_system_time();
     tick_start_ = 0;
+    try_count_ = 5;
 
     for (;;) {
 
         if (!started_) {
+            break;
+        }
+
+        if (try_count_ == 0) {
             break;
         }
 
@@ -1826,6 +1850,7 @@ void HttpStreamReceiver::RecvProc()
 
         tick_start_ = srs_update_system_time();
         first_send_cb_ = true;
+        try_count_--;
 
         CURL *curl;
         CURLcode res;
@@ -1838,6 +1863,7 @@ void HttpStreamReceiver::RecvProc()
         }
 
         curl = curl_easy_init();
+        curl_ = curl;
         if (curl) {
             std::string url = "http://" + gate_server_ + qn_get_origin_stream(stream_url_);
             srs_trace("stream receive from %s\n", url.c_str());
@@ -1863,6 +1889,7 @@ void HttpStreamReceiver::RecvProc()
 
             curl_slist_free_all(chunk);
             curl_easy_cleanup(curl);
+            curl_ = NULL;
         }
     }
 

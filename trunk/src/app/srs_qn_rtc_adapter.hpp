@@ -383,9 +383,11 @@ private:
 private:
     bool started_;
     bool wait_quit_;
+    void* curl_;
     uint64_t session_;
     int64_t tick_start_;
     bool first_send_cb_;
+    uint32_t try_count_;
     std::thread* thread_;
     pthread_mutex_t mutex_;
     char* buf_write_;
