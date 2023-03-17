@@ -1569,8 +1569,8 @@ static size_t StreamSenderReadCallback(char *dest, size_t size, size_t nmemb, vo
 
 size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
 {
-    if (first_send_cb_) {
-        first_send_cb_ = false;
+    if (first_data_) {
+        first_data_ = false;
         srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
     }
 
@@ -1580,6 +1580,10 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
     }
 
     size_t buffer_size = size * nmemb;
+    if (buffer_size <= 0) {
+        srs_trace("callback size %d, return for quit send %s", buffer_size, stream_url_.c_str());
+        return CURL_WRITEFUNC_ERROR;
+    }
 
     if (!last_data_) {
         pthread_mutex_lock(&mutex_);
@@ -1626,6 +1630,23 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
     return buffer_size;
 }
 
+static bool CurlGlobalInit()
+{
+    static bool inited = false;
+    if (inited) {
+        return true;
+    }
+
+    CURLcode res = curl_global_init(CURL_GLOBAL_DEFAULT);
+    if(res != CURLE_OK) {
+        srs_error("curl_global_init failed: %s\n", curl_easy_strerror(res));
+        return false;
+    }
+
+    inited = true;
+    return true;
+}
+
 void HttpStreamSender::SendProc()
 {
     srs_trace("thread for stream sender start, %s", stream_url_.c_str());
@@ -1646,46 +1667,46 @@ void HttpStreamSender::SendProc()
         }
 
         tick_start_ = srs_update_system_time();
-        first_send_cb_ = true;
+        first_data_ = true;
 
         CURL *curl;
         CURLcode res;
 
-        res = curl_global_init(CURL_GLOBAL_DEFAULT);
-        /* Check for errors */
-        if(res != CURLE_OK) {
-            srs_error("curl_global_init() failed: %s\n", curl_easy_strerror(res));
-            return;
+        if (!CurlGlobalInit()) {
+            break;
         }
 
         curl = curl_easy_init();
-        if (curl) {
-            std::string url = "http://" + gate_server_ + stream_url_;
-            srs_trace("stream send to %s\n", url.c_str());
-
-            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            curl_easy_setopt(curl, CURLOPT_POST, 1L);
-            curl_easy_setopt(curl, CURLOPT_READFUNCTION, StreamSenderReadCallback);
-            curl_easy_setopt(curl, CURLOPT_READDATA, this);
-            curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
-
-            struct curl_slist *chunk = NULL;
-            std::string session_id = "x-miku-session-id: " + std::to_string(session_);
-            // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
-            chunk = curl_slist_append(chunk, "Expect: 100-continue");
-            chunk = curl_slist_append(chunk, session_id.c_str());
-            res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
-
-            res = curl_easy_perform(curl);
-            if(res != CURLE_OK) {
-                srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-            }
-
-            srs_trace("stream send to %s finished...\n", url.c_str());
-
-            curl_slist_free_all(chunk);
-            curl_easy_cleanup(curl);
+        if (!curl) {
+            srs_error("curl_easy_init error");
+            continue;
         }
+
+        std::string url = "http://" + gate_server_ + stream_url_;
+        srs_trace("stream send to %s\n", url.c_str());
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, StreamSenderReadCallback);
+        curl_easy_setopt(curl, CURLOPT_READDATA, this);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+        struct curl_slist *chunk = NULL;
+        std::string session_id = "x-miku-session-id: " + std::to_string(session_);
+        // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
+        chunk = curl_slist_append(chunk, "Expect: 100-continue");
+        chunk = curl_slist_append(chunk, session_id.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        srs_trace("stream send to %s finished...\n", url.c_str());
+
+        curl_easy_cleanup(curl);
+        curl_slist_free_all(chunk);
     }
 
     CleanInput();
@@ -1717,9 +1738,9 @@ HttpStreamReceiver::HttpStreamReceiver(const std::string gate_server, const std:
     pthread_mutex_init(&mutex_, NULL);
     started_ = false;
     wait_quit_ = false;
-    curl_ = NULL;
     thread_ = NULL;
-
+    multi_timeouts_ = 0;
+    multi_handle_ = NULL;
     buf_write_ = NULL;
     data_size_ = 0;
     buf_offset_ = 0;
@@ -1763,6 +1784,10 @@ void HttpStreamReceiver::Stop()
         wait_quit_ = true;
         started_ = false;
 
+        if (multi_handle_) {
+            curl_multi_wakeup(multi_handle_);
+        }
+
         // close socket
         // https://stackoverflow.com/questions/28767613/cancel-curl-easy-perform-while-it-is-trying-to-connect
         // if (curl_) {
@@ -1786,8 +1811,8 @@ static size_t StreamReceiverReadCallback(char *dest, size_t size, size_t nmemb, 
 
 size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nmemb)
 {
-    if (first_send_cb_) {
-        first_send_cb_ = false;
+    if (first_data_) {
+        first_data_ = false;
         srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
     }
 
@@ -1902,48 +1927,127 @@ void HttpStreamReceiver::RecvProc()
         }
 
         tick_start_ = srs_update_system_time();
-        first_send_cb_ = true;
+        first_data_ = true;
         retry_count_--;
 
+        if (!CurlGlobalInit()) {
+            break;
+        }
+
+#if 0
         CURL *curl;
         CURLcode res;
 
-        res = curl_global_init(CURL_GLOBAL_DEFAULT);
-        /* Check for errors */
-        if(res != CURLE_OK) {
-            srs_error("curl_global_init() failed: %s\n", curl_easy_strerror(res));
-            return;
+        curl = curl_easy_init();
+        if (!curl) {
+            srs_error("curl_easy_init error");
+            continue;
         }
 
-        curl = curl_easy_init();
-        curl_ = curl;
-        if (curl) {
-            std::string url = "http://" + gate_server_ + qn_get_origin_stream(stream_url_);
-            srs_trace("stream receive from %s\n", url.c_str());
+        std::string url = "http://" + gate_server_ + qn_get_origin_stream(stream_url_);
+        srs_trace("stream receive from %s\n", url.c_str());
 
-            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamReceiverReadCallback);
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, this);
-            curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamReceiverReadCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, this);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
-            struct curl_slist *chunk = NULL;
-            std::string session_id = "x-miku-session-id: " + std::to_string(session_);
-            // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
-            chunk = curl_slist_append(chunk, "Expect: 100-continue");
-            chunk = curl_slist_append(chunk, session_id.c_str());
-            res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+        struct curl_slist *chunk = NULL;
+        std::string session_id = "x-miku-session-id: " + std::to_string(session_);
+        // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
+        // chunk = curl_slist_append(chunk, "Expect: 100-continue");
+        chunk = curl_slist_append(chunk, session_id.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
 
-            res = curl_easy_perform(curl);
-            if(res != CURLE_OK) {
-                srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            srs_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        srs_trace("stream receive from %s finished...\n", url.c_str());
+
+        curl_slist_free_all(chunk);
+        curl_easy_cleanup(curl);
+#else
+        // 使用multi接口
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            srs_error("curl_easy_init error");
+            continue;
+        }
+
+        int still_running = 1;
+        CURLM* multi_handle;
+        multi_handle = curl_multi_init();
+        if (!multi_handle) {
+            srs_error("curl_multi_init error");
+            continue;
+        }
+
+        std::string url = "http://" + gate_server_ + qn_get_origin_stream(stream_url_);
+        srs_trace("stream receive from %s\n", url.c_str());
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamReceiverReadCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, this);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+
+        struct curl_slist *chunk = NULL;
+        std::string session_id = "x-miku-session-id: " + std::to_string(session_);
+        chunk = curl_slist_append(chunk, session_id.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+
+        curl_multi_add_handle(multi_handle, curl);
+        multi_handle_ = multi_handle;
+
+        for (;;) {
+            if (!started_) {
+                break;
             }
 
-            srs_trace("stream receive from %s finished...\n", url.c_str());
+            int numfds;
+            CURLMcode mc = curl_multi_perform(multi_handle, &still_running);
+            if (mc != CURLM_OK) {
+                srs_trace("curl multi perform error, break");
+                break;
+            }
+            
+            if (!still_running) {
+                srs_trace("curl not running, break");
+                break;
+            }
 
-            curl_slist_free_all(chunk);
-            curl_easy_cleanup(curl);
-            curl_ = NULL;
+            mc = curl_multi_poll(multi_handle, NULL, 0, 1000, &numfds);
+            if (mc != CURLM_OK) {
+                srs_error("curl multi pool failed, code %d.\n", (int)mc);
+                break;
+            }
+
+            if (numfds <= 0) {
+                multi_timeouts_++;
+                if (multi_timeouts_ >= 10) {
+                    srs_error("curl multi timeout, break\n");
+                    break;
+                }
+
+                continue;
+            }
+
+            multi_timeouts_ = 0;
+
+            int msgq = 0;
+            CURLMsg* m = NULL;
+            do {
+                m = curl_multi_info_read(multi_handle, &msgq);
+            } while (m);
         }
+
+        multi_handle_ = NULL;
+        curl_multi_remove_handle(multi_handle, curl);
+        curl_easy_cleanup(curl);
+        curl_multi_cleanup(multi_handle);
+        curl_slist_free_all(chunk);
+        srs_trace("stream receive from %s finished...\n", url.c_str());
+#endif
     }
 
     srs_trace("thread for stream receiver quit..., %s", stream_url_.c_str());

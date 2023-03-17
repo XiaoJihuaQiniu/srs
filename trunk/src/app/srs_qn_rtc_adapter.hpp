@@ -337,7 +337,7 @@ private:
     bool wait_quit_;
     uint64_t session_;
     int64_t tick_start_;
-    bool first_send_cb_;
+    bool first_data_;
     std::thread* thread_;
     uint8_t* last_data_;
     size_t last_data_size_;
@@ -385,11 +385,12 @@ private:
 private:
     bool started_;
     bool wait_quit_;
-    void* curl_;
     uint64_t session_;
     int64_t tick_start_;
-    bool first_send_cb_;
+    bool first_data_;
     uint32_t retry_count_;
+    uint32_t multi_timeouts_;
+    void* multi_handle_;
     std::thread* thread_;
     pthread_mutex_t mutex_;
     char* buf_write_;
