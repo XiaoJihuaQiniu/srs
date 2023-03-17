@@ -2,7 +2,7 @@
 #define QN_APP_RTC_HPP
 
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <thread>
 #include <functional>
@@ -220,8 +220,8 @@ private:
     uint64_t recv_unique_id_;
     srs_cond_t consumer_data_cond_;
     std::vector<QnRtcData_SharePtr> vec_consumer_data_;
-    std::map<std::string, QnPubStream*> map_pub_streams_;
-    std::map<std::string, QnReqStream*> map_req_streams_;
+    std::unordered_map<std::string, QnPubStream*> map_pub_streams_;
+    std::unordered_map<std::string, QnReqStream*> map_req_streams_;
 };
 
 
@@ -292,8 +292,8 @@ private:
     std::thread* trans_thread_;
     
     std::string gate_server_;
-    std::map<std::string, StreamSender*> map_stream_senders_;
-    std::map<std::string, StreamReceiver*> map_stream_receivers_;
+    std::unordered_map<std::string, StreamSender*> map_stream_senders_;
+    std::unordered_map<std::string, StreamReceiver*> map_stream_receivers_;
 };
 
 class StreamSender

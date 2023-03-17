@@ -1045,6 +1045,11 @@ srs_error_t QnRtcManager::OnProducerData(const std::string& stream_url, int32_t 
         return err;
     }
 
+    if (type != en_RtcDataType_Media) {
+        srs_warn("unsupport data type %d", type);
+        return err;
+    }
+
     if (!req_stream->published) {
         req_stream->producer->on_publish();
         req_stream->published = true;
@@ -1377,6 +1382,7 @@ void QnSocketPairTransport::thread_process()
         // 没有服务器，则自环
         if (gate_server_.empty()) {
             if (msg->type == en_RtcDataType_Media) {
+                msg->stream_url = qn_get_play_stream(msg->stream_url);
                 write(fds_[1], &msg, read_size);
             } else {
                 delete msg;

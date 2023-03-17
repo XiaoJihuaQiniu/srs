@@ -607,6 +607,7 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
     // flv及m3u8的服务处理就在以下do_serve_http中
     void* user = NULL;
     QnRtcManager::Instance()->RequestStream(req, &user);
+    
     err = do_serve_http(w, r);
     if (err != srs_success) {
         srs_trace("do_serve_http error, %s", SrsCplxError::description(err).c_str());
