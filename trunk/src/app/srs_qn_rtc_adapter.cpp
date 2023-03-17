@@ -875,7 +875,7 @@ srs_error_t QnRtcManager::AddConsumer(QnRtcConsumer* consumer)
     if (it == map_pub_streams_.end()) {
         QnPubStream* pub_stream = new QnPubStream;
         srs_assert(pub_stream);
-        pub_stream->enable = false;
+        pub_stream->published = false;
         pub_stream->consumer = consumer;
         map_pub_streams_[stream_url] = pub_stream;
     }
@@ -891,7 +891,7 @@ void QnRtcManager::StartPublish(const std::string& stream_url)
         return;
     }
 
-    it->second->enable = true;
+    it->second->published = true;
 
     QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
     rtc_data->SetStreamUrl(stream_url);
@@ -907,7 +907,7 @@ void QnRtcManager::StopPublish(const std::string& stream_url)
         return;
     }
 
-    it->second->enable = false;
+    it->second->published = false;
 
     QnRtcData_SharePtr rtc_data = std::make_shared<QnRtcData>();
     rtc_data->SetStreamUrl(stream_url);
@@ -1133,7 +1133,7 @@ srs_error_t QnRtcManager::on_timer(srs_utime_t interval)
 
     srs_trace2("QNDUMP", "==> publish streams:%u", map_pub_streams_.size());
     for (auto it = map_pub_streams_.begin(); it != map_pub_streams_.end(); it++) {
-        srs_trace2("QNDUMP", "[ %s, enable:%d ]", it->first.c_str(), it->second->enable);
+        srs_trace2("QNDUMP", "[ %s, published:%d ]", it->first.c_str(), it->second->published);
         it->second->consumer->Dump();
     }
 
@@ -1762,6 +1762,7 @@ void HttpStreamReceiver::Stop()
     if (started_) {
         wait_quit_ = true;
         started_ = false;
+
         // close socket
         // https://stackoverflow.com/questions/28767613/cancel-curl-easy-perform-while-it-is-trying-to-connect
         // if (curl_) {
@@ -1785,19 +1786,22 @@ static size_t StreamReceiverReadCallback(char *dest, size_t size, size_t nmemb, 
 
 size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nmemb)
 {
-    try_count_ = 0;
-
     if (first_send_cb_) {
         first_send_cb_ = false;
         srs_trace("interval of send start and read callback:%lld", srs_update_system_time() - tick_start_);
     }
 
+    retry_count_ = 0;
     if (wait_quit_) {
         srs_trace("return for quit recv %s", stream_url_.c_str());
         return CURL_WRITEFUNC_ERROR;
     }
 
     size_t buffer_size = size * nmemb;
+    if (buffer_size <= 0) {
+        srs_trace("callback size %d, return for quit recv %s", buffer_size, stream_url_.c_str());
+        return CURL_WRITEFUNC_ERROR;
+    }
 
     // uint8_t* data = (uint8_t*)buffer;
     // // 前4个字节总大小
@@ -1879,7 +1883,7 @@ void HttpStreamReceiver::RecvProc()
 
     session_ = (uint64_t)srs_update_system_time();
     tick_start_ = 0;
-    try_count_ = 5;
+    retry_count_ = 5;
 
     for (;;) {
 
@@ -1887,7 +1891,7 @@ void HttpStreamReceiver::RecvProc()
             break;
         }
 
-        if (try_count_ == 0) {
+        if (retry_count_ == 0) {
             break;
         }
 
@@ -1899,7 +1903,7 @@ void HttpStreamReceiver::RecvProc()
 
         tick_start_ = srs_update_system_time();
         first_send_cb_ = true;
-        try_count_--;
+        retry_count_--;
 
         CURL *curl;
         CURLcode res;
@@ -1925,7 +1929,7 @@ void HttpStreamReceiver::RecvProc()
             struct curl_slist *chunk = NULL;
             std::string session_id = "x-miku-session-id: " + std::to_string(session_);
             // chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
-            // chunk = curl_slist_append(chunk, "Expect: 100-continue");
+            chunk = curl_slist_append(chunk, "Expect: 100-continue");
             chunk = curl_slist_append(chunk, session_id.c_str());
             res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
 

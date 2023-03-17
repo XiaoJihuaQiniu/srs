@@ -167,7 +167,7 @@ public:
 class QnPubStream
 {
 public:
-    bool enable;
+    bool published;
     QnRtcConsumer* consumer;
 };
 
@@ -389,7 +389,7 @@ private:
     uint64_t session_;
     int64_t tick_start_;
     bool first_send_cb_;
-    uint32_t try_count_;
+    uint32_t retry_count_;
     std::thread* thread_;
     pthread_mutex_t mutex_;
     char* buf_write_;
