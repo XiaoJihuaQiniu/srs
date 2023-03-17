@@ -196,7 +196,7 @@ srs_error_t SrsHttpConn::process_requests(SrsRequest** preq)
         // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
         // 最好是判断下发布的stream名字，不能包含这个后缀
         // 这里的path会是 /live/livestream.m3u8 或者 /live/livestream.flv 考虑在这里从源头改掉
-        srs_trace("++++ request host:%s, path:%s", hreq->host().c_str(), hreq->path().c_str());
+        srs_trace("request host:%s, path:%s", hreq->host().c_str(), hreq->path().c_str());
         std::string::size_type pos;
         if ((pos = hreq->path().find(".flv")) != std::string::npos) {
             std::string path_new = hreq->path().substr(0, pos);

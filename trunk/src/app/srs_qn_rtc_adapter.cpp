@@ -22,7 +22,7 @@
 } while(0)
 
 
-const std::string PLAY_STREAM_TAG = "--qnplaystream11";
+const std::string PLAY_STREAM_TAG = "--qn_play_xxx";
 
 // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
 // 最好是判断下发布的stream名字，不能包含这个后缀
@@ -1787,20 +1787,6 @@ void HttpStreamReceiver::Stop()
         if (multi_handle_) {
             curl_multi_wakeup(multi_handle_);
         }
-
-        // close socket
-        // https://stackoverflow.com/questions/28767613/cancel-curl-easy-perform-while-it-is-trying-to-connect
-        // if (curl_) {
-        //     curl_socket_t sockfd;
-        //     //发现不起作用，返回的sockfd为-1
-        //     auto res = curl_easy_getinfo(curl_, CURLINFO_ACTIVESOCKET, &sockfd);
-        //     if(res != CURLE_OK) {
-        //         srs_error("Error: %s\n", curl_easy_strerror(res));
-        //     } else {
-        //         srs_trace("close socket fd(%d) to terminate curl_easy_perform", sockfd);
-        //         close(sockfd);
-        //     }
-        // }
     }
 }
 
@@ -1909,6 +1895,7 @@ void HttpStreamReceiver::RecvProc()
     session_ = (uint64_t)srs_update_system_time();
     tick_start_ = 0;
     retry_count_ = 5;
+    multi_timeouts_ = 0;
 
     for (;;) {
 
