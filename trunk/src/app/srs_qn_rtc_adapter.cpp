@@ -1272,8 +1272,6 @@ srs_error_t QnLoopTransport::cycle()
 QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const TransRecvCbType& callback) :
                                                 QnTransport(name, callback)
 {
-    pthread_mutex_init(&wt_mutex_, NULL);
-
     if (socketpair(AF_UNIX, SOCK_DGRAM, 0, fds_) < 0) {
         srs_error("error %d on socketpair\n", errno);
     }
@@ -1463,9 +1461,9 @@ void QnSocketPairTransport::deal_request_msg(TransMsg* msg)
                 srs_error("stream %s not exist\n", flag.c_str());
                 delete msg;
             } else {
-                pthread_mutex_lock(&wt_mutex_);
+                wt_mutex_.lock();
                 write(fds_[1], &msg, sizeof(msg));
-                pthread_mutex_unlock(&wt_mutex_);
+                wt_mutex_.unlock();
             }
         };
 
@@ -1495,7 +1493,6 @@ void QnSocketPairTransport::deal_request_msg(TransMsg* msg)
 HttpStreamSender::HttpStreamSender(const std::string gate_server, const std::string& stream_url) : 
                                     StreamSender(gate_server, stream_url)
 {
-    pthread_mutex_init(&mutex_, NULL);
     started_ = false;
     wait_quit_ = false;
     thread_ = NULL;
@@ -1555,16 +1552,16 @@ srs_error_t HttpStreamSender::Send(TransMsg* msg)
         return err;
     }
 
-    pthread_mutex_lock(&mutex_);
+    std::lock_guard<std::mutex> lg(mutex_);
+
     if (vec_msgs_.size() >= 200) {
         srs_error("too much(%d) packets wait to send, %s", vec_msgs_.size(), stream_url_.c_str());
         delete msg;
-        pthread_mutex_unlock(&mutex_);
         return err;
     }
 
     vec_msgs_.push_back(msg);
-    pthread_mutex_unlock(&mutex_);
+    cond_var_.notify_one();
     return err;
 }
 
@@ -1592,21 +1589,19 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
     }
 
     if (!last_data_) {
-        pthread_mutex_lock(&mutex_);
+        std::unique_lock<std::mutex> lg(mutex_);
         while (vec_msgs_.empty()) {
-            pthread_mutex_unlock(&mutex_);
-            usleep(5000);
+            cond_var_.wait_for(lg, std::chrono::milliseconds(50));
             if (wait_quit_) {
                 srs_trace("return for quit send %s", stream_url_.c_str());
                 return CURL_READFUNC_ABORT ;
             }
-            pthread_mutex_lock(&mutex_);
         }
 
         auto it = vec_msgs_.begin();
         TransMsg* msg = *it;
         vec_msgs_.erase(it);
-        pthread_mutex_unlock(&mutex_);
+        lg.unlock();
 
         last_data_ = Msg2RtpExt(msg->packet, last_data_size_);
         last_data_offset_ = 0;
@@ -1722,16 +1717,15 @@ void HttpStreamSender::SendProc()
 void HttpStreamSender::CleanInput()
 {
     for (;;) {
-        pthread_mutex_lock(&mutex_);
+        std::lock_guard<std::mutex> lg(mutex_);
+
         if (vec_msgs_.empty()) {
-            pthread_mutex_unlock(&mutex_);
             break;
         }
 
         auto it = vec_msgs_.begin();
         TransMsg* msg = *it;
         vec_msgs_.erase(it);
-        pthread_mutex_unlock(&mutex_);
         delete msg;
     }
 }
@@ -1741,7 +1735,6 @@ void HttpStreamSender::CleanInput()
 HttpStreamReceiver::HttpStreamReceiver(const std::string gate_server, const std::string& stream_url, const StreamRecvCbType& callback) : 
                         StreamReceiver(gate_server, stream_url, callback)
 {
-    pthread_mutex_init(&mutex_, NULL);
     started_ = false;
     wait_quit_ = false;
     thread_ = NULL;
@@ -2017,7 +2010,7 @@ void HttpStreamReceiver::RecvProc()
 
             if (numfds <= 0) {
                 multi_timeouts_++;
-                if (multi_timeouts_ >= 10) {
+                if (multi_timeouts_ >= 30) {
                     srs_error("curl multi timeout, break\n");
                     break;
                 }

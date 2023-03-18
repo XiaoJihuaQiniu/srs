@@ -6,8 +6,9 @@
 #include <string>
 #include <thread>
 #include <functional>
+#include <mutex>
+#include <condition_variable>
 #include <inttypes.h>
-#include <pthread.h>
 
 #include <srs_core.hpp>
 #include <srs_protocol_st.hpp>
@@ -288,7 +289,7 @@ private:
     SrsCoroutine* trd_;
     srs_cond_t packet_cond_;
 
-    pthread_mutex_t wt_mutex_;
+    std::mutex wt_mutex_;
     std::thread* trans_thread_;
     
     std::string gate_server_;
@@ -342,7 +343,8 @@ private:
     uint8_t* last_data_;
     size_t last_data_size_;
     size_t last_data_offset_;
-    pthread_mutex_t mutex_;
+    std::mutex mutex_;
+    std::condition_variable cond_var_; 
     std::vector<TransMsg*> vec_msgs_;
 };
 
@@ -392,7 +394,7 @@ private:
     uint32_t multi_timeouts_;
     void* multi_handle_;
     std::thread* thread_;
-    pthread_mutex_t mutex_;
+    std::mutex mutex_;
     char* buf_write_;
     uint32_t data_size_;
     uint32_t buf_offset_;
