@@ -2027,11 +2027,23 @@ void HttpStreamReceiver::RecvProc()
 
             multi_timeouts_ = 0;
 
-            int msgq = 0;
-            CURLMsg* m = NULL;
-            do {
-                m = curl_multi_info_read(multi_handle, &msgq);
-            } while (m);
+            bool done = false;
+            for (;;) {
+                int msgq = 0;
+                CURLMsg* m = curl_multi_info_read(multi_handle, &msgq);
+                if (!m) {
+                    break;
+                }
+                if (m->msg == CURLMSG_DONE) {
+                    srs_assert(curl == m->easy_handle);
+                    srs_trace("stream receive done %s, result:%d", stream_url_.c_str(), m->data.result);
+                    done = true;
+                    break;
+                }
+            }
+            if (done) {
+                break;
+            }
         }
 
         multi_handle_ = NULL;
