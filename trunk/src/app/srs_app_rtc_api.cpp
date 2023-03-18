@@ -684,6 +684,11 @@ srs_error_t SrsGoApiRtcWhip::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessa
     }
 
     string sdp = ruc.local_sdp_str_;
+    // mb20230308 
+    // https://github.com/ossrs/srs/issues/3170
+    // 参考上面的链接使用WHIP推流不成功，浏览器控制台有个报错显示http
+    // response中的header中找不到"Location"字段。这里加上后WHIP推流成功。
+    // w->header()->set("Location", "unknow");
     w->header()->set("Content-Type", "application/sdp");
     return w->write((char*)sdp.data(), (int)sdp.length());
 }

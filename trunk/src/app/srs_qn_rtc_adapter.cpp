@@ -1595,7 +1595,7 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
         pthread_mutex_lock(&mutex_);
         while (vec_msgs_.empty()) {
             pthread_mutex_unlock(&mutex_);
-            usleep(2000);
+            usleep(5000);
             if (wait_quit_) {
                 srs_trace("return for quit send %s", stream_url_.c_str());
                 return CURL_READFUNC_ABORT ;

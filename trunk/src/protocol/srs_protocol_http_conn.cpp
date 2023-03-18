@@ -64,6 +64,9 @@ void SrsHttpParser::set_jsonp(bool allow_jsonp)
     jsonp = allow_jsonp;
 }
 
+std::string qn_get_play_stream(const std::string& stream);
+bool qn_is_play_stream(const std::string& stream);
+
 srs_error_t SrsHttpParser::parse_message(ISrsReader* reader, ISrsHttpMessage** ppmsg)
 {
     srs_error_t err = srs_success;
@@ -110,6 +113,23 @@ srs_error_t SrsHttpParser::parse_message(ISrsReader* reader, ISrsHttpMessage** p
     msg->set_basic(hp_header.type, (http_method)hp_header.method, (http_status)hp_header.status_code, hp_header.content_length);
     msg->set_header(header, http_should_keep_alive(&hp_header));
     // For HTTP response, no url.
+
+    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // 最好是判断下发布的stream名字，不能包含这个后缀
+    // m3u8和flv只能是播放，不会是发布，所以可以修改
+    srs_trace("ori http url: %s", url.c_str());
+    std::string::size_type pos;
+    if ((pos = url.find(".flv")) != std::string::npos || (pos = url.find(".m3u8")) != std::string::npos) {
+        if (!qn_is_play_stream(url)) {
+            std::string url_new = url.substr(0, pos);
+            std::string url_end = url.substr(pos);
+            url_new = qn_get_play_stream(url_new);
+            url_new += url_end;
+            url = url_new;
+            srs_trace("new http url: %s", url.c_str());
+        }
+    }
+
     if (parsed_type_ != HTTP_RESPONSE && (err = msg->set_url(url, jsonp)) != srs_success) {
         srs_freep(msg);
         return srs_error_wrap(err, "set url=%s, jsonp=%d", url.c_str(), jsonp);
