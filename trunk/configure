@@ -191,7 +191,7 @@ if [[ $SRS_SRT == YES ]]; then
 fi
 
 # the link options, always use static link
-SrsLinkOptions="-ldl -lpthread -lcurl -lz";
+SrsLinkOptions="-ldl -lpthread -lz";
 if [[ $SRS_SSL == YES && $SRS_USE_SYS_SSL == YES ]]; then
     SrsLinkOptions="${SrsLinkOptions} -lssl -lcrypto";
 fi
@@ -279,10 +279,18 @@ PROTOCOL_INCS="src/protocol"; MODULE_DIR=${PROTOCOL_INCS} . $SRS_WORKDIR/auto/mo
 PROTOCOL_OBJS="${MODULE_OBJS[@]}"
 
 #
+#libcurl
+LibCurlRoot="${SRS_WORKDIR}/3rdparty/curl-7.88.1/libcurl"; LibCurlFile="${SRS_WORKDIR}/3rdparty/curl-7.88.1/libcurl.a"
+
+#
 #App Module, for SRS server only.
 MODULE_ID="APP"
 MODULE_DEPENDS=("CORE" "KERNEL" "PROTOCOL")
 ModuleLibIncs=(${SRS_OBJS} ${LibSSLRoot})
+
+#libcurl
+ModuleLibIncs+=(${LibCurlRoot})
+
 if [[ $SRS_GPERF == YES ]]; then
     ModuleLibIncs+=(${LibGperfRoot})
 fi
@@ -378,6 +386,9 @@ done
 #
 # all depends libraries
 ModuleLibFiles=(${LibSTfile} ${LibSSLfile} ${LibGperfFile})
+#libcurl
+ModuleLibFiles+=(${LibCurlFile})
+
 if [[ $SRS_RTC == YES ]]; then
     ModuleLibFiles+=(${LibSrtpFile})
 fi

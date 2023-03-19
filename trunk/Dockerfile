@@ -19,7 +19,7 @@ SHELL ["/bin/bash", "-c"]
 
 # Install depends tools.
 RUN if [[ $INSTALLDEPENDS != 'NO' ]]; then \
-        apt-get update && apt-get install -y gcc make g++ patch unzip perl git libasan5 libcurl4-openssl-dev; \
+        apt-get update && apt-get install -y gcc make g++ patch unzip perl git libasan5; \
     fi
 
 # Copy source code to docker.
