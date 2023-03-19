@@ -6,7 +6,7 @@
 #include <srs_app_hybrid.hpp>
 #include <srs_app_server.hpp>
 #include <srs_app_rtc_source.hpp>
-#include <libcurl/curl.h>
+#include <curl/curl.h>
 
 #define json_value(type, v, tag) type v; const std::string tag_##v = #tag
 #define json_value_str(type, v, tag) type v; const std::string tag_##v = tag
@@ -1611,7 +1611,7 @@ size_t HttpStreamSender::SendMoreCallback(char *dest, size_t size, size_t nmemb)
     size_t buffer_size = size * nmemb;
     if (buffer_size <= 0) {
         srs_trace("callback size %d, return for quit send %s", buffer_size, stream_url_.c_str());
-        return CURL_WRITEFUNC_ERROR;
+        return CURLE_WRITE_ERROR;
     }
 
     if (!last_data_) {
@@ -1834,13 +1834,13 @@ size_t HttpStreamReceiver::RecvMoreCallback(char *buffer, size_t size, size_t nm
     retry_count_ = 0;
     if (wait_quit_) {
         srs_trace("return for quit recv %s", stream_url_.c_str());
-        return CURL_WRITEFUNC_ERROR;
+        return CURLE_WRITE_ERROR;
     }
 
     size_t buffer_size = size * nmemb;
     if (buffer_size <= 0) {
         srs_trace("callback size %d, return for quit recv %s", buffer_size, stream_url_.c_str());
-        return CURL_WRITEFUNC_ERROR;
+        return CURLE_WRITE_ERROR;
     }
 
     // uint8_t* data = (uint8_t*)buffer;
