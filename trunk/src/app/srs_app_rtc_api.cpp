@@ -125,7 +125,7 @@ srs_error_t SrsGoApiRtcPlay::do_serve_http(ISrsHttpResponseWriter* w, ISrsHttpMe
     srs_discovery_tc_url(ruc.req_->tcUrl, ruc.req_->schema, ruc.req_->host, ruc.req_->vhost,
                          ruc.req_->app, ruc.req_->stream, ruc.req_->port, ruc.req_->param);
 
-    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
     srs_trace("set rtc stream to a playstream");
     ruc.req_->stream = qn_get_play_stream(ruc.req_->stream);
@@ -645,7 +645,7 @@ srs_error_t SrsGoApiRtcWhip::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessa
     ruc.req_->app = app.empty() ? "live" : app;
     ruc.req_->stream = stream.empty() ? "livestream" : stream;
 
-    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
     if (action == "play") {
         srs_trace("set rtcwhip stream to a playstream");
@@ -684,11 +684,11 @@ srs_error_t SrsGoApiRtcWhip::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessa
     }
 
     string sdp = ruc.local_sdp_str_;
-    // mb20230308 TODO FIXME 
+    // [qnmserver] TODO FIXME 
     // https://github.com/ossrs/srs/issues/3170
     // 参考上面的链接使用WHIP推流不成功，浏览器控制台有个报错显示http
     // response中的header中找不到"Location"字段。这里加上后WHIP推流成功。
-    w->header()->set("Location", "unknow");
+    // w->header()->set("Location", "unknow");
     w->header()->set("Content-Type", "application/sdp");
     return w->write((char*)sdp.data(), (int)sdp.length());
 }

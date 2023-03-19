@@ -24,7 +24,7 @@
 
 const std::string PLAY_STREAM_TAG = "--qn_play_xxx";
 
-// mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+// 播放stream自动加上不太可能被使用的后缀，而且
 // 最好是判断下发布的stream名字，不能包含这个后缀
 std::string qn_get_play_stream(const std::string& stream)
 {
@@ -360,7 +360,7 @@ QnDataPacket::~QnDataPacket()
     size_ = 0;
 }
 
-// mb20230308 自定义rtc consumer承接rtc数据
+// 自定义rtc consumer承接rtc数据
 QnRtcConsumer::QnRtcConsumer(SrsRtcSource* s)
 {
     SrsCplxError::srs_assert(s);
@@ -532,7 +532,7 @@ const int kAudioSamplerate      = 48000;
 const int kVideoPayloadType = 102;
 const int kVideoSamplerate  = 90000;
 
-// mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
+// 自定义rtc producer，将rtp包提供给SrsRtcSource
 QnRtcProducer::QnRtcProducer(SrsRtcSource* s)
 {
     SrsCplxError::srs_assert(s);
@@ -757,7 +757,7 @@ srs_error_t QnRtcProducer::on_timer(srs_utime_t interval)
     return srs_success;
 }
 
-// mb20230308
+
 QnRtcManager::QnRtcManager()
 {
     auto recv_callback = [&](const std::string& stream_url, int32_t type, const QnDataPacket_SharePtr& packet) {

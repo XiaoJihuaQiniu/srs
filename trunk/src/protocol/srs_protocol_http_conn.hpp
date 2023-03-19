@@ -156,7 +156,7 @@ public:
     virtual std::string host();
     virtual int port();
     virtual std::string path();
-    // mb20230308
+    // [qnmserver]
     virtual void set_path(const std::string& path);
     virtual std::string query();
     virtual std::string ext();

@@ -1038,7 +1038,7 @@ string SrsHttpUri::get_path()
     return path;
 }
 
-// mb20230308
+// [qnmserver]
 void SrsHttpUri::set_path(const std::string& path)
 {
     this->path = path;

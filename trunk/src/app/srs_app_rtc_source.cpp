@@ -451,7 +451,7 @@ srs_error_t SrsRtcSource::on_source_changed()
         qn_consumer_->on_stream_change(stream_desc_);
     }
 
-    // mb20230308
+    // [qnmserver]
     // // Notify all consumers.
     // std::vector<SrsRtcConsumer*>::iterator it;
     // for (it = consumers.begin(); it != consumers.end(); ++it) {
@@ -489,7 +489,7 @@ srs_error_t SrsRtcSource::create_consumer(SrsRtcConsumer*& consumer)
 {
     srs_error_t err = srs_success;
 
-    // mb20230308
+    // [qnmserver]
     if (!qn_is_play_stream2(req)) {
         return srs_error_wrap(err, "not a play stream");
     }
@@ -499,7 +499,7 @@ srs_error_t SrsRtcSource::create_consumer(SrsRtcConsumer*& consumer)
 
     // TODO: FIXME: Implements edge cluster.
 
-    // mb20230308
+    // [qnmserver]
     QnRtcManager::Instance()->RequestStream(req, consumer);
 
     return err;
@@ -531,7 +531,7 @@ void SrsRtcSource::on_consumer_destroy(SrsRtcConsumer* consumer)
         }
     }
 
-    // mb20230308
+    // [qnmserver]
     QnRtcManager::Instance()->StopRequestStream(req, consumer);
 }
 
@@ -556,7 +556,7 @@ srs_error_t SrsRtcSource::on_publish()
     // update the request object.
     srs_assert(req);
 
-    // mb20230308
+    // [qnmserver]
     if (qn_is_play_stream2(req)) {
         srs_error("do not publish on a play stream, error");
         return srs_error_wrap(err, "publish error");
@@ -579,7 +579,7 @@ srs_error_t SrsRtcSource::on_publish()
         return srs_error_wrap(err, "source id change");
     }
 
-    // mb20230308 must request idr
+    // [qnmserver] must request idr
     // If bridge to other source, handle event and start timer to request PLI.
     if (true /*bridge_*/) {
         // if ((err = bridge_->on_publish()) != srs_success) {
@@ -610,7 +610,7 @@ void SrsRtcSource::on_unpublish()
     srs_assert(req);
     srs_trace("stop publish %s\n", req->get_stream_url().c_str());
 
-    // mb20230308
+    // [qnmserver]
     if (qn_is_play_stream2(req)) {
         srs_error("do not unpublish on a play stream, error");
         return;
@@ -656,7 +656,7 @@ srs_error_t SrsRtcSource::on_publish_qn()
     // update the request object.
     srs_assert(req);
 
-    // mb20230308
+    // [qnmserver]
     if (!qn_is_play_stream2(req)) {
         srs_error("call this publish on a play stream, error, error");
         return srs_error_wrap(err, "publish error");
@@ -687,7 +687,7 @@ void SrsRtcSource::on_unpublish_qn()
     srs_assert(req);
     srs_trace("stop publish %s\n", req->get_stream_url().c_str());
 
-    // mb20230308
+    // [qnmserver]
     if (!qn_is_play_stream2(req)) {
         srs_error("call this unpublish on a play stream");
         return;
@@ -753,7 +753,7 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
         return err;
     }
 
-    // mb20230308
+    // [qnmserver]
     if (qn_consumer_) {
         qn_consumer_->enqueue(pkt);
     }
@@ -772,7 +772,7 @@ srs_error_t SrsRtcSource::on_rtp(SrsRtpPacket* pkt)
     return err;
 }
 
-// mb20230308
+// [qnmserver]
 srs_error_t SrsRtcSource::on_rtp_qn(const std::string& id, SrsRtpPacket* pkt)
 {
     // Update context id if changed.
@@ -1121,7 +1121,7 @@ srs_error_t SrsRtcFromRtmpBridge::package_opus(SrsAudioFrame* audio, SrsRtpPacke
     pkt->header.set_marker(true);
     pkt->header.set_sequence(audio_sequence++);
     pkt->header.set_timestamp(audio->dts * 48);
-    // mb20230308
+    // [qnmserver]
     pkt->set_avsync_time(audio->dts);
 
     SrsRtpRawPayload* raw = new SrsRtpRawPayload();
@@ -1268,7 +1268,7 @@ srs_error_t SrsRtcFromRtmpBridge::package_stap_a(SrsRtcSource* source, SrsShared
     pkt->header.set_marker(false);
     pkt->header.set_sequence(video_sequence++);
     pkt->header.set_timestamp(msg->timestamp * 90);
-    // mb20230308
+    // [qnmserver]
     pkt->set_avsync_time(msg->timestamp);
 
     SrsRtpSTAPPayload* stap = new SrsRtpSTAPPayload();
@@ -1351,7 +1351,7 @@ srs_error_t SrsRtcFromRtmpBridge::package_nalus(SrsSharedPtrMessage* msg, const 
         pkt->nalu_type = (SrsAvcNaluType)first_nalu_type;
         pkt->header.set_sequence(video_sequence++);
         pkt->header.set_timestamp(msg->timestamp * 90);
-        // mb20230308
+        // [qnmserver]
         pkt->set_avsync_time(msg->timestamp);
 
         pkt->set_payload(raw, SrsRtspPacketPayloadTypeNALU);
@@ -1388,7 +1388,7 @@ srs_error_t SrsRtcFromRtmpBridge::package_nalus(SrsSharedPtrMessage* msg, const 
             pkt->nalu_type = (SrsAvcNaluType)kFuA;
             pkt->header.set_sequence(video_sequence++);
             pkt->header.set_timestamp(msg->timestamp * 90);
-            // mb20230308
+            // [qnmserver]
             pkt->set_avsync_time(msg->timestamp);
 
             fua->nri = (SrsAvcNaluType)header;
@@ -1420,11 +1420,11 @@ srs_error_t SrsRtcFromRtmpBridge::package_single_nalu(SrsSharedPtrMessage* msg, 
     pkt->header.set_payload_type(video_payload_type_);
     pkt->header.set_ssrc(video_ssrc);
     pkt->frame_type = SrsFrameTypeVideo;
-    // mb20230308, here is a bug
+    // [qnmserver], here is a bug
     pkt->nalu_type = (SrsAvcNaluType)nal_type;
     pkt->header.set_sequence(video_sequence++);
     pkt->header.set_timestamp(msg->timestamp * 90);
-    // mb20230308
+    // [qnmserver]
     pkt->set_avsync_time(msg->timestamp);
 
     SrsRtpRawPayload* raw = new SrsRtpRawPayload();
@@ -1457,11 +1457,11 @@ srs_error_t SrsRtcFromRtmpBridge::package_fu_a(SrsSharedPtrMessage* msg, SrsSamp
         pkt->header.set_payload_type(video_payload_type_);
         pkt->header.set_ssrc(video_ssrc);
         pkt->frame_type = SrsFrameTypeVideo;
-        // mb20230308, here is a bug
+        // [qnmserver], here is a bug
         pkt->nalu_type = (SrsAvcNaluType)kFuA;
         pkt->header.set_sequence(video_sequence++);
         pkt->header.set_timestamp(msg->timestamp * 90);
-        // mb20230308
+        // [qnmserver]
         pkt->set_avsync_time(msg->timestamp);
 
         SrsRtpFUAPayload2* fua = new SrsRtpFUAPayload2();

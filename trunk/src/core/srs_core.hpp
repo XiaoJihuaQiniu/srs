@@ -87,7 +87,7 @@ public:
     //      <0	Either the value of the first character that does not match is lower in the compared string, or all compared characters match but the compared string is shorter.
     //      >0	Either the value of the first character that does not match is greater in the compared string, or all compared characters match but the compared string is longer.
     int compare(const _SrsContextId& to) const;
-    // mb20230308
+    // [qnmserver]
     int compare(const std::string& to) const;
     std::string get_value() const;
     // Set the value of context id.

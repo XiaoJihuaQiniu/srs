@@ -193,7 +193,7 @@ srs_error_t SrsHttpConn::process_requests(SrsRequest** preq)
         SrsHttpMessage* hreq = (SrsHttpMessage*)req;
         hreq->set_connection(this);
 
-        // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+        // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
         // 最好是判断下发布的stream名字，不能包含这个后缀
         // m3u8和flv只能是播放，不会是发布，所以可以修改
         srs_trace("request host:%s, path:%s", hreq->host().c_str(), hreq->path().c_str());

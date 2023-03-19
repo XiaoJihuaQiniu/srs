@@ -2711,7 +2711,7 @@ srs_error_t SrsLiveSource::create_consumer(SrsLiveConsumer*& consumer)
     srs_trace("create consumer for %s", req->get_stream_url().c_str());
     srs_error_t err = srs_success;
 
-    // mb20230308
+    // [qnmserver]
     if (!qn_is_play_stream2(req)) {
         return srs_error_wrap(err, "not a play stream");
     }
@@ -2731,7 +2731,7 @@ srs_error_t SrsLiveSource::create_consumer(SrsLiveConsumer*& consumer)
         }
     }
     
-    // mb20230308
+    // [qnmserver]
     QnRtcManager::Instance()->RequestStream(req, consumer);
 
     return err;
@@ -2803,7 +2803,7 @@ void SrsLiveSource::on_consumer_destroy(SrsLiveConsumer* consumer)
         publisher_idle_at_ = srs_get_system_time();
     }
 
-    // mb20230308
+    // [qnmserver]
     QnRtcManager::Instance()->StopRequestStream(req, consumer);
 }
 

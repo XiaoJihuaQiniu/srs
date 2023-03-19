@@ -68,7 +68,7 @@ private:
 typedef std::shared_ptr<QnRtcData> QnRtcData_SharePtr;
 
 
-// mb20230308 自定义rtc consumer承接rtc数据
+// 自定义rtc consumer承接rtc数据
 class QnRtcConsumer : public ISrsFastTimer
 {
 public:
@@ -112,7 +112,7 @@ private:
     float   vid_bitrate_;
 };
 
-// mb20230308 自定义rtc producer，将rtp包提供给SrsRtcSource
+// 自定义rtc producer，将rtp包提供给SrsRtcSource
 class QnRtcProducer : public ISrsRtspPacketDecodeHandler, public ISrsFastTimer
 {
 public:

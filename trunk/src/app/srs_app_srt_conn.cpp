@@ -279,7 +279,7 @@ srs_error_t SrsMpegtsSrtConn::do_cycle()
         return srs_error_new(ERROR_SRT_CONN, "srt disabled, vhost=%s", req_->vhost.c_str());
     }
 
-    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
     srs_trace("srt mode:%d\n", mode);
     if (mode == SrtModePull) {

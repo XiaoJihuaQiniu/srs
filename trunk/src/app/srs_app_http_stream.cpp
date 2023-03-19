@@ -583,7 +583,7 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
     // @remark Be careful that the stream has extension now, might cause identify fail.
     req->stream = srs_path_basename(r->path());
     
-    // mb20230308 播放stream自动加上不太可能被使用的后缀，而且
+    // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
     // 最好是判断下发布的stream名字，不能包含这个后缀
     // 修改放在这里有问题，至少应该在更上一级调用去修改
     // srs_trace("set live stream to a playstream");
@@ -603,7 +603,7 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
         return srs_error_wrap(err, "http hook");
     }
     
-    // mb20230308 
+    // [qnmserver] 
     // flv及m3u8的服务处理就在以下do_serve_http中
     // void* user = NULL;
     // QnRtcManager::Instance()->RequestStream(req, &user);

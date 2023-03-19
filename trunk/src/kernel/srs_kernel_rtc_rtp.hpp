@@ -331,7 +331,7 @@ public:
     void set_extension_types(SrsRtpExtensionTypes* v);
 // interface ISrsEncoder
 public:
-    // mb20230308
+    // [qnmserver]
     uint64_t payload_bytes();
     virtual uint64_t nb_bytes();
     virtual srs_error_t encode(SrsBuffer* buf);
