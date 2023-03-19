@@ -583,9 +583,7 @@ srs_error_t SrsLiveStream::serve_http(ISrsHttpResponseWriter* w, ISrsHttpMessage
     // @remark Be careful that the stream has extension now, might cause identify fail.
     req->stream = srs_path_basename(r->path());
     
-    // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
-    // 最好是判断下发布的stream名字，不能包含这个后缀
-    // 修改放在这里有问题，至少应该在更上一级调用去修改
+    // [qnmserver] 发布和播放走不同的数据流通路，播放stream加上特殊后缀区别
     // srs_trace("set live stream to a playstream");
     // req->stream = qn_get_play_stream(req->stream);
 

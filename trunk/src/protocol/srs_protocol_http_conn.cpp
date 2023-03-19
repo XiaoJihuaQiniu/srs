@@ -114,8 +114,7 @@ srs_error_t SrsHttpParser::parse_message(ISrsReader* reader, ISrsHttpMessage** p
     msg->set_header(header, http_should_keep_alive(&hp_header));
     // For HTTP response, no url.
 
-    // [qnmserver] 播放stream自动加上不太可能被使用的后缀，而且
-    // 最好是判断下发布的stream名字，不能包含这个后缀
+    // [qnmserver] 发布和播放走不同的数据流通路，播放stream加上特殊后缀区别
     // m3u8和flv只能是播放，不会是发布，所以可以修改
     srs_trace("ori http url: %s", url.c_str());
     std::string::size_type pos;

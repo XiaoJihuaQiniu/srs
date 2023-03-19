@@ -24,8 +24,7 @@
 
 const std::string PLAY_STREAM_TAG = "--qn_play_xxx";
 
-// 播放stream自动加上不太可能被使用的后缀，而且
-// 最好是判断下发布的stream名字，不能包含这个后缀
+// 发布和播放走不同的数据流通路，播放stream加上特殊后缀区别
 std::string qn_get_play_stream(const std::string& stream)
 {
     std::string::size_type pos;
