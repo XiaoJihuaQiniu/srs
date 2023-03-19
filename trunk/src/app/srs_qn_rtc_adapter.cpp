@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <exception>
 #include <unistd.h>
+#include <sys/prctl.h>
 #include <srs_qn_rtc_adapter.hpp>
 #include <srs_app_hybrid.hpp>
 #include <srs_app_server.hpp>
@@ -85,6 +86,12 @@ const uint32_t JSON_IN_HEAD_SIZE = 8;
 //| total size(4bytes) | data |
 const uint32_t DATA_ONLY_HEAD_SIZE = 4;
 
+static void SetThreadName(const char* name)
+{
+    prctl(PR_SET_NAME, (unsigned long)name, 0, 0, 0);
+}
+
+// 数据以大端形式存放，和小端之间需转换
 static void WriteUint32BE(uint8_t* data, uint32_t value)
 {
     data[0] = ((value >> 24) & 0xff);
@@ -97,6 +104,25 @@ static uint32_t ReadUint32BE(uint8_t* data)
 {
     uint32_t value = (data[0] << 24) | (data[1] << 16) | (data[2] << 8) | data[3];
     return value;
+}
+
+static void WriteUint64BE(uint8_t* data, uint64_t value)
+{
+    data[0] = ((value >> 56) & 0xff);
+    data[1] = ((value >> 48) & 0xff);
+    data[2] = ((value >> 40) & 0xff);
+    data[3] = ((value >> 32) & 0xff);
+    data[4] = ((value >> 24) & 0xff);
+    data[5] = ((value >> 16) & 0xff);
+    data[6] = ((value >> 8) & 0xff);
+    data[7] = (value & 0xff);
+}
+
+static uint64_t ReadUint64BE(uint8_t* data)
+{
+    uint32_t v0 = (data[0] << 24) | (data[1] << 16) | (data[2] << 16) | data[3];
+    uint32_t v1 = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7];
+    return ((uint64_t)v0 << 32 | (uint64_t)v1);
 }
 
 
@@ -197,22 +223,22 @@ uint8_t* Msg2RtpExt(const QnDataPacket_SharePtr& packet, size_t& size)
     }
 
     // 新加扩展
-    data_write[0] = 0xc0 | (source_id.size() - 1);     // 扩展类型12
+    data_write[0] = 0xc0 | (source_id.size() - 1);
     data_write++;
     memcpy(data_write, source_id.c_str(), source_id.size());
     data_write += source_id.size();
 
-    data_write[0] = 0x10 | (sizeof(unique_id) - 1);     // 扩展类型13
+    data_write[0] = 0x10 | 7;
     data_write++;
-    *(uint64_t*)data_write = unique_id;
-    data_write += sizeof(unique_id);
+    WriteUint64BE(data_write, unique_id);
+    data_write += 8;
 
-    data_write[0] = 0xe0 | (sizeof(astime) - 1);        // 扩展类型14
+    data_write[0] = 0xe0 | 7;
     data_write++;
-    *(int64_t*)data_write = astime;
-    data_write += sizeof(astime);
+    WriteUint64BE(data_write, (uint64_t)astime);
+    data_write += 8;
 
-    data_write[0] = 0xf0 | (type.size() - 1);           // 扩展类型15
+    data_write[0] = 0xf0 | (type.size() - 1);
     data_write++;
     memcpy(data_write, type.c_str(), type.size());
     data_write += type.size();
@@ -272,11 +298,11 @@ QnDataPacket_SharePtr MsgFromRtpExt(const std::string& stream_url, uint8_t* rdt,
                 js[MTYPE] = type;
                 // srs_trace("type:%s", type.c_str());
             } else if (t == 0xe0) {
-                astime = *(int64_t*)(p + 1);
+                astime = (int64_t)ReadUint64BE(p + 1);
                 js[ASTIME] = astime;
                 // srs_trace("astime:%lld", astime);
             } else if (t == 0x10) {
-                unique_id = *(uint64_t*)(p + 1);
+                unique_id = ReadUint64BE(p + 1);
                 js[PACKET_ID] = unique_id;
                 // srs_trace("unique_id:%llu", unique_id);
             } else if (t == 0xc0) {
@@ -1275,6 +1301,7 @@ QnSocketPairTransport::QnSocketPairTransport(const std::string& name, const Tran
     }
 
     auto f = [&]() {
+        SetThreadName("sp-transport");
         thread_process();
     };
 
@@ -1515,6 +1542,7 @@ srs_error_t HttpStreamSender::Start()
 
     srs_trace("start stream sender, %s\n", stream_url_.c_str());
     auto f = [&]() {
+        SetThreadName("pub-sender");
         SendProc();
         wait_quit_ = false;
         started_ = false;
@@ -1758,6 +1786,7 @@ srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
 
     srs_trace("start stream receiver, %s\n", stream_url_.c_str());
     auto f = [&]() {
+        SetThreadName("sub-reciver");
         RecvProc();
         wait_quit_ = false;
         started_ = false;
@@ -1776,14 +1805,17 @@ srs_error_t HttpStreamReceiver::HttpStreamReceiver::Start()
 
 void HttpStreamReceiver::Stop()
 {
-    srs_trace("stop stream receiver, %s\n", stream_url_.c_str());
-    if (started_) {
-        wait_quit_ = true;
-        started_ = false;
+    if (!started_) {
+        srs_trace("stream receiver already stoped, %s\n", stream_url_.c_str());
+        return;
+    }
 
-        if (multi_handle_) {
-            curl_multi_wakeup(multi_handle_);
-        }
+    srs_trace("stop stream receiver, %s\n", stream_url_.c_str());
+    wait_quit_ = true;
+    started_ = false;
+    if (multi_handle_) {
+        srs_trace("wakeup curl multi handle");
+        curl_multi_wakeup(multi_handle_);
     }
 }
 
