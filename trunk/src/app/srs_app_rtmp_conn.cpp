@@ -1091,11 +1091,11 @@ srs_error_t SrsRtmpConn::acquire_publish(SrsLiveSource* source)
     // Check whether RTC stream is busy.
 #ifdef SRS_RTC
     SrsRtcSource *rtc = NULL;
-    // mb20230308 必须转rtc
-    srs_trace("++++ rtmp publish always bridge to rtc\n");
+    // [qnmserver] 必须转rtc
+    srs_trace("rtmp publish bridge to rtc\n");
 //    bool rtc_server_enabled = _srs_config->get_rtc_server_enabled();
 //    bool rtc_enabled = _srs_config->get_rtc_enabled(req->vhost);
-//    if (rtc_server_enabled && rtc_enabled && !info->edge) {
+    if (true /* rtc_server_enabled && rtc_enabled && !info->edge */) {
         if ((err = _srs_rtc_sources->fetch_or_create(req, &rtc)) != srs_success) {
             return srs_error_wrap(err, "create source");
         }
@@ -1103,12 +1103,12 @@ srs_error_t SrsRtmpConn::acquire_publish(SrsLiveSource* source)
         if (!rtc->can_publish()) {
             return srs_error_new(ERROR_SYSTEM_STREAM_BUSY, "rtc stream %s busy", req->get_stream_url().c_str());
         }
-//    }
+    }
 #endif
 
     // Bridge to RTC streaming.
 #if defined(SRS_RTC) && defined(SRS_FFMPEG_FIT)
-    srs_trace("++++ SRS_RTC and SRS_FFMPEG_FIT defined, new SrsRtcFromRtmpBridge\n");
+    srs_trace("SRS_RTC and SRS_FFMPEG_FIT defined, new SrsRtcFromRtmpBridge\n");
     if (rtc) {
         SrsRtcFromRtmpBridge *bridge = new SrsRtcFromRtmpBridge(rtc);
         if ((err = bridge->initialize(req)) != srs_success) {

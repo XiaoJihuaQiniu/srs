@@ -1190,30 +1190,28 @@ srs_error_t SrsRtcPublishStream::initialize(SrsRequest* r, SrsRtcSourceDescripti
         return srs_error_new(ERROR_SYSTEM_STREAM_BUSY, "rtmp stream %s busy", r->get_stream_url().c_str());
     }
 
-    // mb20230308 rtmp转rtc后发到中间server，rtc发布不用转rtmp等
-#if 0
+    // [qnmserver] rtc发布不用转rtmp
     // Bridge to rtmp
 #if defined(SRS_RTC) && defined(SRS_FFMPEG_FIT)
-    bool rtc_to_rtmp = _srs_config->get_rtc_to_rtmp(req_->vhost);
-    srs_trace("++++ new SrsRtmpFromRtcBridge, rtc_to_rtmp:%d\n", rtc_to_rtmp);
-    if (rtc_to_rtmp) {
-        if ((err = _srs_sources->fetch_or_create(r, _srs_hybrid->srs()->instance(), &rtmp)) != srs_success) {
-            return srs_error_wrap(err, "create source");
-        }
+    // bool rtc_to_rtmp = _srs_config->get_rtc_to_rtmp(req_->vhost);
+    // srs_trace("new SrsRtmpFromRtcBridge, rtc_to_rtmp:%d\n", rtc_to_rtmp);
+    // if (rtc_to_rtmp) {
+    //     if ((err = _srs_sources->fetch_or_create(r, _srs_hybrid->srs()->instance(), &rtmp)) != srs_success) {
+    //         return srs_error_wrap(err, "create source");
+    //     }
 
-        // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
-        // especially for stream merging.
-        rtmp->set_cache(false);
+    //     // Disable GOP cache for RTC2RTMP bridge, to keep the streams in sync,
+    //     // especially for stream merging.
+    //     rtmp->set_cache(false);
 
-        SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
-        if ((err = bridge->initialize(r)) != srs_success) {
-            srs_freep(bridge);
-            return srs_error_wrap(err, "create bridge");
-        }
+    //     SrsRtmpFromRtcBridge *bridge = new SrsRtmpFromRtcBridge(rtmp);
+    //     if ((err = bridge->initialize(r)) != srs_success) {
+    //         srs_freep(bridge);
+    //         return srs_error_wrap(err, "create bridge");
+    //     }
 
-        source->set_bridge(bridge);
-    }
-#endif
+    //     source->set_bridge(bridge);
+    // }
 #endif
 
     return err;

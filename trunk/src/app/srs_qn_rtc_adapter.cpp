@@ -453,9 +453,8 @@ srs_error_t QnRtcConsumer::enqueue(SrsRtpPacket* pkt)
     js[ASTIME] = pkt->get_avsync_time();
     js[MTYPE] = pkt->is_audio() ? "audio" : "video";
     
-    // srs_trace("++++ stream:%s, pt:%d, audio:%d, key:%d, mark:%d, pack time:%lld\n", stream_url_.c_str(), pkt->payload_type(), 
+    // srs_trace("stream:%s, pt:%d, audio:%d, key:%d, mark:%d, pack time:%lld\n", stream_url_.c_str(), pkt->payload_type(), 
     //             pkt->is_audio(), pkt->is_keyframe(), pkt->header.get_marker(), pkt->get_avsync_time());
-
     // if (!pkt->is_audio()) {
     //     js[PAYLOAD_TYPE] = pkt->payload_type();
     //     js[KEY_FRAME] = pkt->is_keyframe() ? 1 : 0;

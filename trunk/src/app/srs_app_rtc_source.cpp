@@ -333,7 +333,7 @@ ISrsRtcSourceBridge::~ISrsRtcSourceBridge()
 
 SrsRtcSource::SrsRtcSource()
 {
-    srs_trace("++++ new SrsRtcSource\n");
+    srs_trace("new SrsRtcSource\n");
     is_created_ = false;
     is_delivering_packets_ = false;
 
@@ -350,7 +350,7 @@ SrsRtcSource::SrsRtcSource()
 
 SrsRtcSource::~SrsRtcSource()
 {
-    srs_trace("++++ delete SrsRtcSource\n");
+    srs_trace("delete SrsRtcSource\n");
     // never free the consumers,
     // for all consumers are auto free.
     consumers.clear();
@@ -550,7 +550,7 @@ void SrsRtcSource::set_stream_created()
 
 srs_error_t SrsRtcSource::on_publish()
 {
-    srs_trace("++++ start publish %s\n", req->get_stream_url().c_str());
+    srs_trace("start publish %s\n", req->get_stream_url().c_str());
     srs_error_t err = srs_success;
 
     // update the request object.
@@ -608,7 +608,7 @@ void SrsRtcSource::on_unpublish()
     }
 
     srs_assert(req);
-    srs_trace("++++ stop publish %s\n", req->get_stream_url().c_str());
+    srs_trace("stop publish %s\n", req->get_stream_url().c_str());
 
     // mb20230308
     if (qn_is_play_stream2(req)) {
@@ -879,7 +879,7 @@ srs_error_t SrsRtcSource::on_timer(srs_utime_t interval)
 
 SrsRtcFromRtmpBridge::SrsRtcFromRtmpBridge(SrsRtcSource* source)
 {
-    srs_trace("++++ new SrsRtcFromRtmpBridge\n");
+    srs_trace("new SrsRtcFromRtmpBridge\n");
     req = NULL;
     source_ = source;
     format = new SrsRtmpFormat();
@@ -1507,7 +1507,7 @@ srs_error_t SrsRtcFromRtmpBridge::consume_packets(vector<SrsRtpPacket*>& pkts)
 
 SrsRtmpFromRtcBridge::SrsRtmpFromRtcBridge(SrsLiveSource *src)
 {
-    srs_trace("++++ new SrsRtmpFromRtcBridge\n");
+    srs_trace("new SrsRtmpFromRtcBridge\n");
     source_ = src;
     codec_ = NULL;
     is_first_audio = true;

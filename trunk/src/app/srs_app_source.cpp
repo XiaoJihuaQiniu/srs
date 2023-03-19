@@ -1909,7 +1909,7 @@ ISrsLiveSourceBridge::~ISrsLiveSourceBridge()
 
 SrsLiveSource::SrsLiveSource()
 {
-    srs_trace("++++ new SrsLiveSource\n");
+    srs_trace("new SrsLiveSource\n");
     req = NULL;
     jitter_algorithm = SrsRtmpJitterAlgorithmOFF;
     mix_correct = false;
@@ -1938,7 +1938,7 @@ SrsLiveSource::SrsLiveSource()
 
 SrsLiveSource::~SrsLiveSource()
 {
-    srs_trace("++++ delete SrsLiveSource\n");
+    srs_trace("delete SrsLiveSource\n");
     _srs_config->unsubscribe(this);
     
     // never free the consumers,
