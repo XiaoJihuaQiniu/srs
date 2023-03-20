@@ -1,1 +1,1 @@
-基于SRS 5.0.145(https://github.com/ossrs/srs/tree/5.0release)
+基于SRS 5.0release (https://github.com/ossrs/srs/tree/5.0release)
